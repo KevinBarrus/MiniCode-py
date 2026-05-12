@@ -107,17 +107,18 @@ class AdaptiveWorkflow:
     
     def _calculate_error_rate(self, trace: ExecutionTrace) -> float:
         """Calculate the error rate.
-        
+
         Args:
             trace: Execution trace
-            
+
         Returns:
             Error rate (0.0 - 1.0)
         """
-        if not trace.results:
+        total = len(trace.results)
+        if not total:
             return 0.0
         failed = sum(1 for r in trace.results if r.status == AgentStatus.FAILED)
-        return failed / len(trace.results)
+        return failed / total
     
     def should_continue(self, trace: ExecutionTrace, max_adjustments: int = 3) -> bool:
         """Check if execution should continue with adjustments.

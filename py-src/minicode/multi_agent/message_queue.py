@@ -110,12 +110,12 @@ class MessageQueue:
         filter_type: MessageType | None = None,
     ) -> AgentMessage | None:
         """Receive a message for an agent.
-        
+
         Args:
             agent_id: ID of the receiving agent
             timeout: Maximum time to wait (None for blocking)
             filter_type: Only return messages of this type
-            
+
         Returns:
             The message or None if timeout
         """
@@ -123,25 +123,39 @@ class MessageQueue:
             if agent_id not in self._queues:
                 return None
             q = self._queues[agent_id]
-        
-        try:
-            if timeout is not None and timeout <= 0:
-                msg = q.get_nowait()
-            else:
-                msg = q.get(timeout=timeout)
-            
-            if filter_type and msg.msg_type != filter_type:
-                # Put it back and try again
+
+        # Fast path: no filter, direct get
+        if filter_type is None:
+            try:
+                if timeout is not None and timeout <= 0:
+                    return q.get_nowait()
+                return q.get(timeout=timeout)
+            except queue.Empty:
+                return None
+
+        # Filtered path: peek and filter
+        deadline = time.time() + timeout if timeout is not None else None
+        while True:
+            try:
+                remaining = None
+                if deadline is not None:
+                    remaining = deadline - time.time()
+                    if remaining <= 0:
+                        return None
+
+                msg = q.get(timeout=remaining) if remaining is None or remaining > 0 else q.get_nowait()
+
+                if msg.msg_type == filter_type:
+                    return msg
+
+                # Put back non-matching message
                 with self._lock:
                     try:
                         q.put_nowait(msg)
                     except queue.Full:
                         pass
+            except queue.Empty:
                 return None
-            
-            return msg
-        except queue.Empty:
-            return None
     
     def receive_all(
         self,
@@ -149,11 +163,11 @@ class MessageQueue:
         filter_type: MessageType | None = None,
     ) -> list[AgentMessage]:
         """Receive all pending messages for an agent.
-        
+
         Args:
             agent_id: ID of the receiving agent
             filter_type: Only return messages of this type
-            
+
         Returns:
             List of messages
         """
@@ -161,23 +175,37 @@ class MessageQueue:
             if agent_id not in self._queues:
                 return []
             q = self._queues[agent_id]
-            
+
+            # Fast path: no filter, drain all
+            if filter_type is None:
+                messages = []
+                while not q.empty():
+                    try:
+                        messages.append(q.get_nowait())
+                    except queue.Empty:
+                        break
+                return messages
+
+            # Filtered path: drain and filter
             messages = []
+            to_requeue = []
             while not q.empty():
                 try:
                     msg = q.get_nowait()
-                    if filter_type is None or msg.msg_type == filter_type:
+                    if msg.msg_type == filter_type:
                         messages.append(msg)
                     else:
-                        # Put back non-matching messages
-                        try:
-                            q.put_nowait(msg)
-                        except queue.Full:
-                            pass
-                            break
+                        to_requeue.append(msg)
                 except queue.Empty:
                     break
-            
+
+            # Requeue non-matching messages
+            for msg in to_requeue:
+                try:
+                    q.put_nowait(msg)
+                except queue.Full:
+                    break
+
             return messages
     
     def get_message_history(

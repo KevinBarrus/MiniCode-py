@@ -110,10 +110,10 @@ class OrchestrationPattern(ABC):
 
 class SequentialPattern(OrchestrationPattern):
     """Sequential execution pattern.
-    
+
     Agents work one after another, each building on previous results.
     """
-    
+
     def execute(
         self,
         task: str,
@@ -122,12 +122,12 @@ class SequentialPattern(OrchestrationPattern):
     ) -> ExecutionTrace:
         trace = self._create_trace(task, "sequential")
         trace.roles = roles
-        
+
         previous_output = task
-        
+
         for i, role in enumerate(roles):
             agent_id = f"{role.name}_{i}"
-            
+
             # Build task with previous context
             if i > 0:
                 agent_task = (
@@ -136,27 +136,27 @@ class SequentialPattern(OrchestrationPattern):
                 )
             else:
                 agent_task = task
-            
+
             result = self._run_agent(agent_id, role, agent_task, agent_factory)
             trace.results.append(result)
-            
+
             if result.success:
                 previous_output = result.output
                 self.shared_memory.write(f"agent_{i}_output", result.output, agent_id)
             else:
                 # Stop on failure
                 break
-        
+
         trace.end_time = time.time()
         return trace
 
 
 class ParallelPattern(OrchestrationPattern):
     """Parallel execution pattern.
-    
+
     Multiple agents work simultaneously, results aggregated at the end.
     """
-    
+
     def execute(
         self,
         task: str,
@@ -166,26 +166,28 @@ class ParallelPattern(OrchestrationPattern):
     ) -> ExecutionTrace:
         trace = self._create_trace(task, "parallel")
         trace.roles = roles
-        
+
+        # Pre-build task strings to avoid repeated f-string formatting
+        task_prefixes = [f"Your task ({role.description}):\n{task}" for role in roles]
+
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {}
             for i, role in enumerate(roles):
                 agent_id = f"{role.name}_{i}"
-                agent_task = f"Your task ({role.description}):\n{task}"
-                future = executor.submit(self._run_agent, agent_id, role, agent_task, agent_factory)
+                future = executor.submit(self._run_agent, agent_id, role, task_prefixes[i], agent_factory)
                 futures[future] = agent_id
-            
+
             for future in concurrent.futures.as_completed(futures):
                 result = future.result()
                 trace.results.append(result)
-                
+
                 if result.success:
                     self.shared_memory.write(
                         f"agent_{result.agent_id}_output",
                         result.output,
                         result.agent_id,
                     )
-        
+
         trace.end_time = time.time()
         return trace
 

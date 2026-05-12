@@ -6,6 +6,7 @@ using keyword extraction and template matching.
 
 from __future__ import annotations
 
+import functools
 import re
 from typing import Any
 
@@ -109,35 +110,36 @@ class RoleAnalyzer:
         if custom_templates:
             self._templates.update(custom_templates)
     
+    @functools.lru_cache(maxsize=128)
+    def _analyze_cached(self, task_lower: str, max_roles: int) -> tuple[str, ...]:
+        """缓存角色分析结果，返回匹配的角色名称元组"""
+        scores: dict[str, int] = {}
+        for role_name, keywords in ROLE_KEYWORDS.items():
+            score = sum(1 for keyword in keywords if keyword in task_lower)
+            if score > 0:
+                scores[role_name] = score
+
+        if not scores:
+            return ("research", "code")
+
+        sorted_roles = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+        return tuple(name for name, _ in sorted_roles[:max_roles])
+
     def analyze(self, task: str, max_roles: int = 3) -> list[AgentRole]:
         """Analyze a task and generate appropriate agent roles.
-        
+
         Args:
             task: The task description
             max_roles: Maximum number of roles to generate
-            
+
         Returns:
             List of agent roles sorted by relevance
         """
-        task_lower = task.lower()
-        
-        # Score each role based on keyword matches
-        scores: dict[str, int] = {}
-        for role_name, keywords in ROLE_KEYWORDS.items():
-            score = 0
-            for keyword in keywords:
-                if keyword in task_lower:
-                    score += 1
-            if score > 0:
-                scores[role_name] = score
-        
-        # Sort by score and take top N
-        sorted_roles = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-        
+        role_names = self._analyze_cached(task.lower(), max_roles)
+
         roles: list[AgentRole] = []
-        for role_name, _ in sorted_roles[:max_roles]:
+        for role_name in role_names:
             if role_name in self._templates:
-                # Create a copy with task-specific context
                 template = self._templates[role_name]
                 role = AgentRole(
                     name=template.name,
@@ -149,14 +151,7 @@ class RoleAnalyzer:
                     max_steps=template.max_steps,
                 )
                 roles.append(role)
-        
-        # If no roles matched, default to research + code
-        if not roles:
-            roles = [
-                self._templates["research"],
-                self._templates["code"],
-            ]
-        
+
         return roles
     
     def add_custom_role(self, name: str, role: AgentRole) -> None:

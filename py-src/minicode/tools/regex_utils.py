@@ -17,20 +17,31 @@ def _validate_regex_test(input_data: dict) -> dict:
     return {"pattern": pattern.strip(), "text": text, "flags": flags.strip()}
 
 
+# Precompute flag mapping for fast lookup
+_FLAG_MAP: dict[str, int] = {
+    "i": re.IGNORECASE,
+    "m": re.MULTILINE,
+    "s": re.DOTALL,
+    "x": re.VERBOSE,
+    "a": re.ASCII,
+    "l": re.LOCALE,
+    "u": re.UNICODE,
+}
+
+
+def _parse_flags(flags: str) -> int:
+    """Parse regex flags string into bitmask."""
+    return sum(_FLAG_MAP[f] for f in flags if f in _FLAG_MAP)
+
+
 def _run_regex_test(input_data: dict, context: ToolContext) -> ToolResult:
     """Test a regex pattern against text."""
     pattern = input_data["pattern"]
     text = input_data["text"]
     flags = input_data.get("flags", "")
-    
-    # Parse flags
-    flag_bits = 0
-    if "i" in flags:
-        flag_bits |= re.IGNORECASE
-    if "m" in flags:
-        flag_bits |= re.MULTILINE
-    if "s" in flags:
-        flag_bits |= re.DOTALL
+
+    # Parse flags using precomputed mapping
+    flag_bits = _parse_flags(flags)
     
     try:
         regex = re.compile(pattern, flag_bits)
@@ -97,15 +108,9 @@ def _run_regex_replace(input_data: dict, context: ToolContext) -> ToolResult:
     text = input_data["text"]
     replacement = input_data["replacement"]
     flags = input_data.get("flags", "")
-    
-    # Parse flags
-    flag_bits = 0
-    if "i" in flags:
-        flag_bits |= re.IGNORECASE
-    if "m" in flags:
-        flag_bits |= re.MULTILINE
-    if "s" in flags:
-        flag_bits |= re.DOTALL
+
+    # Parse flags using precomputed mapping
+    flag_bits = _parse_flags(flags)
     
     try:
         regex = re.compile(pattern, flag_bits)

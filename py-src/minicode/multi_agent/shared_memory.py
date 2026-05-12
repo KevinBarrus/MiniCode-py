@@ -71,12 +71,13 @@ class SharedMemory:
     
     def read_all(self) -> dict[str, Any]:
         """Read all data from shared memory.
-        
+
         Returns:
             Copy of all stored data
         """
         with self._lock:
-            return dict(self._data)
+            # Use dict.copy() for shallow copy (faster than dict())
+            return self._data.copy()
     
     def delete(self, key: str, agent_id: str) -> bool:
         """Delete a key from shared memory.

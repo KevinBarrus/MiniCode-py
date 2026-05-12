@@ -233,29 +233,28 @@ line_count_tool = ToolDefinition(
 # Random String
 # ---------------------------------------------------------------------------
 
+import random
+import string
+
+# Precompute character sets for fast lookup
+_CHAR_SETS: dict[str, str] = {
+    "alphanumeric": string.ascii_letters + string.digits,
+    "alpha": string.ascii_letters,
+    "numeric": string.digits,
+    "hex": string.hexdigits.lower(),
+    "ascii": string.printable,
+}
+
+
 def _run_random_string(input_data: dict, context: ToolContext) -> ToolResult:
     length = input_data.get("length", 16)
     chars = input_data.get("chars", "alphanumeric")
-    
+
     if not 1 <= length <= 1000:
         return ToolResult(ok=False, output="length must be between 1 and 1000")
-    
-    import random
-    import string
-    
-    if chars == "alphanumeric":
-        alphabet = string.ascii_letters + string.digits
-    elif chars == "alpha":
-        alphabet = string.ascii_letters
-    elif chars == "numeric":
-        alphabet = string.digits
-    elif chars == "hex":
-        alphabet = string.hexdigits.lower()
-    elif chars == "ascii":
-        alphabet = string.printable
-    else:
-        alphabet = chars
-    
+
+    alphabet = _CHAR_SETS.get(chars, chars)
+
     result = "".join(random.choice(alphabet) for _ in range(length))
     return ToolResult(ok=True, output=result)
 

@@ -12,11 +12,28 @@ from minicode.tooling import ToolDefinition, ToolContext, ToolResult
 # Current Time
 # ---------------------------------------------------------------------------
 
+# Precompute timezone offsets for fast lookup
+_TIMEZONE_OFFSETS: dict[str, int] = {
+    "EST": -5, "EDT": -4, "CST": -6, "CDT": -5,
+    "PST": -8, "PDT": -7, "JST": 9, "CET": 1, "CEST": 2,
+    "GMT": 0, "UTC": 0,
+}
+
+# Precompute format strings for fast lookup
+_TIME_FORMATS: dict[str, str] = {
+    "iso": "iso",
+    "unix": "unix",
+    "date": "%Y-%m-%d",
+    "time": "%H:%M:%S",
+    "full": "%Y-%m-%d %H:%M:%S %Z",
+}
+
+
 def _run_current_time(input_data: dict, context: ToolContext) -> ToolResult:
     """Get current time in various formats."""
     tz_name = input_data.get("timezone", "UTC")
     format_str = input_data.get("format", "iso")
-    
+
     try:
         # Get timezone
         if tz_name == "local":
@@ -24,30 +41,21 @@ def _run_current_time(input_data: dict, context: ToolContext) -> ToolResult:
         elif tz_name == "UTC":
             now = datetime.now(timezone.utc)
         else:
-            # Try to find timezone offset
-            now = datetime.now(timezone.utc)
-            # Simple handling for common zones
-            offsets = {"EST": -5, "EDT": -4, "CST": -6, "CDT": -5, "PST": -8, "PDT": -7, "JST": 9, "CET": 1, "CEST": 2}
-            offset_hours = offsets.get(tz_name.upper(), 0)
+            offset_hours = _TIMEZONE_OFFSETS.get(tz_name.upper(), 0)
             now = datetime.now(timezone.utc) + timedelta(hours=offset_hours)
-    
+
     except Exception:
         now = datetime.now()
-    
-    # Format output
-    if format_str == "iso":
+
+    # Format output using precomputed formats
+    fmt = _TIME_FORMATS.get(format_str, "iso")
+    if fmt == "iso":
         output = now.isoformat()
-    elif format_str == "unix":
+    elif fmt == "unix":
         output = str(int(now.timestamp()))
-    elif format_str == "date":
-        output = now.strftime("%Y-%m-%d")
-    elif format_str == "time":
-        output = now.strftime("%H:%M:%S")
-    elif format_str == "full":
-        output = now.strftime("%Y-%m-%d %H:%M:%S %Z")
     else:
-        output = now.isoformat()
-    
+        output = now.strftime(fmt)
+
     return ToolResult(ok=True, output=output)
 
 

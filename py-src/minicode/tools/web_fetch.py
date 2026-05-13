@@ -68,7 +68,7 @@ def _run(input_data: dict, context) -> ToolResult:
         class LimitedRedirectHandler(urllib.request.HTTPRedirectHandler):
             def __init__(self):
                 self.redirect_count = 0
-            
+
             def redirect_request(self, req, fp, code, msg, headers, newurl):
                 self.redirect_count += 1
                 if self.redirect_count > MAX_REDIRECTS:
@@ -76,7 +76,7 @@ def _run(input_data: dict, context) -> ToolResult:
                 return urllib.request.HTTPRedirectHandler.redirect_request(self, req, fp, code, msg, headers, newurl)
 
         opener = urllib.request.build_opener(LimitedRedirectHandler())
-        
+
         with opener.open(req, timeout=30) as response:
             content_type = response.headers.get("Content-Type", "")
             charset = "utf-8"

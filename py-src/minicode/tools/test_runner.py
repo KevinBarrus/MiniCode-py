@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import functools
-import os
 import re
 import subprocess
 import sys
@@ -21,6 +20,8 @@ _SKIP_TEST_DIRS = frozenset({".git", "__pycache__", "venv", "env", ".tox", "node
 @functools.lru_cache(maxsize=64)
 def _discover_test_files_cached(path_str: str, pattern: str) -> tuple[str, ...]:
     """缓存测试文件发现结果，避免重复遍历目录"""
+    import os
+
     path = Path(path_str)
     test_files = []
 
@@ -46,6 +47,21 @@ def _discover_test_files(path: Path, pattern: str = "test_*.py") -> list[Path]:
 # Test Output Parsers
 # ---------------------------------------------------------------------------
 
+# 预编译正则表达式，避免重复编译
+_PYTEST_SUMMARY_RE = re.compile(r'(\d+) passed')
+_PYTEST_FAILED_RE = re.compile(r'(\d+) failed')
+_PYTEST_ERROR_RE = re.compile(r'(\d+) error')
+_PYTEST_SKIPPED_RE = re.compile(r'(\d+) skipped')
+_PYTEST_WARNING_RE = re.compile(r'(\d+) warning')
+_PYTEST_TEST_RE = re.compile(r'(PASSED|FAILED|ERROR|SKIPPED|XFAIL|XPASS)\s+(.+?)(?:::(\w+))?', re.MULTILINE)
+_PYTEST_FAILURE_RE = re.compile(r'FAILURES\s*\n(.*?)(?=\n={50,}|\Z)', re.DOTALL)
+_PYTEST_COVERAGE_RE = re.compile(r'TOTAL\s+\d+\s+\d+\s+(\d+)%')
+
+_UNITTEST_RAN_RE = re.compile(r'Ran (\d+) test')
+_UNITTEST_FAILURE_RE = re.compile(r'failures=(\d+)')
+_UNITTEST_ERROR_RE = re.compile(r'errors=(\d+)')
+
+
 def _parse_pytest_output(output: str) -> dict[str, Any]:
     """Parse pytest output into structured format."""
     results = {
@@ -58,53 +74,50 @@ def _parse_pytest_output(output: str) -> dict[str, Any]:
         "failures": [],
         "coverage": None,
     }
-    
+
     # Parse summary line
-    summary_match = re.search(r'(\d+) passed', output)
+    summary_match = _PYTEST_SUMMARY_RE.search(output)
     if summary_match:
         results["passed"] = int(summary_match.group(1))
-    
-    failed_match = re.search(r'(\d+) failed', output)
+
+    failed_match = _PYTEST_FAILED_RE.search(output)
     if failed_match:
         results["failed"] = int(failed_match.group(1))
-    
-    error_match = re.search(r'(\d+) error', output)
+
+    error_match = _PYTEST_ERROR_RE.search(output)
     if error_match:
         results["errors"] = int(error_match.group(1))
-    
-    skipped_match = re.search(r'(\d+) skipped', output)
+
+    skipped_match = _PYTEST_SKIPPED_RE.search(output)
     if skipped_match:
         results["skipped"] = int(skipped_match.group(1))
-    
-    warning_match = re.search(r'(\d+) warning', output)
+
+    warning_match = _PYTEST_WARNING_RE.search(output)
     if warning_match:
         results["warnings"] = int(warning_match.group(1))
-    
+
     # Parse individual test results
-    test_pattern = re.compile(r'(PASSED|FAILED|ERROR|SKIPPED|XFAIL|XPASS)\s+(.+?)(?:::(\w+))?', re.MULTILINE)
-    for match in test_pattern.finditer(output):
+    for match in _PYTEST_TEST_RE.finditer(output):
         status = match.group(1)
         file_path = match.group(2)
         test_name = match.group(3)
-        
+
         results["tests"].append({
             "file": file_path.strip(),
             "name": test_name or "unknown",
             "status": status.lower(),
         })
-    
+
     # Parse failure details
-    failure_pattern = re.compile(r'FAILURES\s*\n(.*?)(?=\n={50,}|\Z)', re.DOTALL)
-    failure_match = failure_pattern.search(output)
+    failure_match = _PYTEST_FAILURE_RE.search(output)
     if failure_match:
         results["failure_details"] = failure_match.group(1)[:2000]
-    
+
     # Parse coverage if present
-    coverage_pattern = re.compile(r'TOTAL\s+\d+\s+\d+\s+(\d+)%')
-    coverage_match = coverage_pattern.search(output)
+    coverage_match = _PYTEST_COVERAGE_RE.search(output)
     if coverage_match:
         results["coverage"] = int(coverage_match.group(1))
-    
+
     return results
 
 
@@ -118,21 +131,21 @@ def _parse_unittest_output(output: str) -> dict[str, Any]:
         "tests": [],
         "failures": [],
     }
-    
+
     # Parse summary
-    summary_match = re.search(r'Ran (\d+) test', output)
+    summary_match = _UNITTEST_RAN_RE.search(output)
     if summary_match:
         total = int(summary_match.group(1))
         if "OK" in output:
             results["passed"] = total
         else:
-            failed_match = re.search(r'failures=(\d+)', output)
-            error_match = re.search(r'errors=(\d+)', output)
-            
+            failed_match = _UNITTEST_FAILURE_RE.search(output)
+            error_match = _UNITTEST_ERROR_RE.search(output)
+
             results["failed"] = int(failed_match.group(1)) if failed_match else 0
             results["errors"] = int(error_match.group(1)) if error_match else 0
             results["passed"] = total - results["failed"] - results["errors"]
-    
+
     return results
 
 
@@ -145,20 +158,20 @@ def _validate(input_data: dict) -> dict:
     framework = input_data.get("framework", "auto")
     if framework not in ("auto", "pytest", "unittest"):
         raise ValueError("framework must be one of: auto, pytest, unittest")
-    
+
     verbose = input_data.get("verbose", False)
     if not isinstance(verbose, bool):
         raise ValueError("verbose must be a boolean")
-    
+
     coverage = input_data.get("coverage", False)
     if not isinstance(coverage, bool):
         raise ValueError("coverage must be a boolean")
-    
+
     pattern = input_data.get("pattern")
     timeout = int(input_data.get("timeout", 60))
     if timeout < 10 or timeout > 300:
         raise ValueError("timeout must be between 10 and 300 seconds")
-    
+
     return {
         "path": path,
         "framework": framework,
@@ -180,20 +193,20 @@ def _run(input_data: dict, context) -> ToolResult:
     coverage = input_data["coverage"]
     pattern = input_data.get("pattern")
     timeout = input_data["timeout"]
-    
+
     if not target.exists():
         return ToolResult(ok=False, output=f"Path not found: {target}")
-    
+
     # Discover test files
     test_files = _discover_test_files(target)
-    
+
     if not test_files:
         return ToolResult(
             ok=False,
             output=f"No test files found in {input_data['path']}\n\n"
                    f"Expected files matching: test_*.py or *_test.py",
         )
-    
+
     # Apply pattern filter if provided
     if pattern:
         test_files = [f for f in test_files if pattern in f.name]
@@ -202,7 +215,7 @@ def _run(input_data: dict, context) -> ToolResult:
                 ok=False,
                 output=f"No test files match pattern: {pattern}",
             )
-    
+
     # Determine framework
     if framework == "auto":
         # Check if pytest is available
@@ -215,36 +228,36 @@ def _run(input_data: dict, context) -> ToolResult:
             framework = "pytest"
         except Exception:
             framework = "unittest"
-    
+
     # Build command
     if framework == "pytest":
         cmd = [sys.executable, "-m", "pytest"]
-        
+
         # Add test files
         cmd.extend([str(f) for f in test_files[:10]])  # Limit to 10 files
-        
+
         if verbose:
             cmd.append("-v")
-        
+
         if coverage:
             cmd.extend(["--cov", str(target)])
-        
+
         # Add pattern
         if pattern:
             cmd.extend(["-k", pattern])
-        
+
     else:  # unittest
         cmd = [sys.executable, "-m", "unittest", "discover"]
         cmd.extend(["-s", str(target)])
-        
+
         if pattern:
             cmd.extend(["-p", f"*{pattern}*"])
         else:
             cmd.extend(["-p", "test_*.py"])
-        
+
         if verbose:
             cmd.append("-v")
-    
+
     # Run tests
     lines = [
         "🧪 Test Runner",
@@ -258,7 +271,7 @@ def _run(input_data: dict, context) -> ToolResult:
         "-" * 60,
         "",
     ]
-    
+
     try:
         result = subprocess.run(
             cmd,
@@ -267,48 +280,47 @@ def _run(input_data: dict, context) -> ToolResult:
             text=True,
             timeout=timeout,
         )
-        
+
         output = result.stdout + "\n" + result.stderr
         success = result.returncode == 0
-        
+
         # Parse results
         if framework == "pytest":
             parsed = _parse_pytest_output(output)
         else:
             parsed = _parse_unittest_output(output)
-        
+
         # Format results
         lines.append("📊 Results:")
         lines.append(f"  ✓ Passed:  {parsed.get('passed', 0)}")
         lines.append(f"  ✗ Failed:  {parsed.get('failed', 0)}")
         lines.append(f"  ⚠ Errors:  {parsed.get('errors', 0)}")
         lines.append(f"  ⊘ Skipped: {parsed.get('skipped', 0)}")
-        
+
         if parsed.get("coverage"):
             lines.append(f"  📈 Coverage: {parsed['coverage']}%")
-        
+
         lines.append("")
-        
+
         # Show failures
         if parsed.get("failed", 0) > 0 or parsed.get("errors", 0) > 0:
             lines.append("❌ Failures:")
-            
+
             if parsed.get("failure_details"):
                 lines.append(parsed["failure_details"][:2000])
             else:
                 # Extract from output
-                failure_pattern = re.compile(r'FAILURES\s*\n(.*?)(?=\n={50,}|\Z)', re.DOTALL)
-                failure_match = failure_pattern.search(output)
+                failure_match = _PYTEST_FAILURE_RE.search(output)
                 if failure_match:
                     lines.append(failure_match.group(1)[:2000])
-            
+
             lines.append("")
-        
+
         # Show warnings
         if parsed.get("warnings", 0) > 0:
             lines.append(f"⚠️  {parsed['warnings']} warning(s)")
             lines.append("")
-        
+
         # Show test list if verbose
         if verbose and parsed.get("tests"):
             lines.append("📝 All Tests:")
@@ -318,7 +330,7 @@ def _run(input_data: dict, context) -> ToolResult:
             if len(parsed["tests"]) > 50:
                 lines.append(f"  ... and {len(parsed['tests']) - 50} more")
             lines.append("")
-        
+
         # Full output if requested
         if verbose:
             lines.append("-" * 60)
@@ -327,14 +339,14 @@ def _run(input_data: dict, context) -> ToolResult:
             lines.append(output[:5000])
             if len(output) > 5000:
                 lines.append(f"\n... (output truncated)")
-        
+
     except subprocess.TimeoutExpired:
         lines.append(f"❌ Tests timed out after {timeout} seconds")
         success = False
     except Exception as e:
         lines.append(f"❌ Test execution error: {e}")
         success = False
-    
+
     return ToolResult(
         ok=success,
         output="\n".join(lines),

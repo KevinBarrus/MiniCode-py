@@ -94,12 +94,14 @@ def _format_mismatch_diagnostic(content: str, search: str) -> str:
             best_ratio = ratio
             best_start = i
     
-    lines = ["Search string not found in file."]
+    lines: list[str] = ["Search string not found in file."]
 
     if best_start >= 0 and best_ratio > 0.3:
-        lines.append("")
-        lines.append(f"Closest match at line {best_start + 1} (similarity: {best_ratio:.0%}):")
-        lines.append("")
+        lines.extend([
+            "",
+            f"Closest match at line {best_start + 1} (similarity: {best_ratio:.0%}):",
+            "",
+        ])
 
         # Show the closest match with line numbers
         for j, line in enumerate(content_lines[best_start:best_start + window_size]):
@@ -115,8 +117,7 @@ def _format_mismatch_diagnostic(content: str, search: str) -> str:
 
         # Show diff hint
         if best_ratio < 1.0:
-            lines.append("")
-            lines.append("Hints:")
+            lines.extend(["", "Hints:"])
             search_norm = [_normalize_line(l) for l in search_lines]
             content_norm = [_normalize_line(l) for l in content_lines[best_start:best_start + window_size]]
             for j in range(min(len(search_norm), len(content_norm))):
@@ -124,8 +125,10 @@ def _format_mismatch_diagnostic(content: str, search: str) -> str:
                     lines.append(f"  Line {best_start + 1 + j}: expected {search_norm[j]!r}, found {content_norm[j]!r}")
     else:
         # No close match found, show first few lines of file for context
-        lines.append("")
-        lines.append(f"File has {len(content_lines)} lines. First 10 lines:")
+        lines.extend([
+            "",
+            f"File has {len(content_lines)} lines. First 10 lines:",
+        ])
         for i, line in enumerate(content_lines[:10]):
             lines.append(f"  {i + 1:4d} | {line}")
 
@@ -200,14 +203,19 @@ def _run(input_data: dict, context) -> ToolResult:
     
     # Apply replacement
     if input_data["replace_all"]:
-        # Replace from end to start to preserve offsets
-        next_content = content
+        # Replace from end to start using list join for better performance
+        parts = []
+        last_end = len(content)
         for start_offset, end_offset in reversed(matches):
-            next_content = next_content[:start_offset] + input_data["replace"] + next_content[end_offset:]
+            parts.append(content[end_offset:last_end])
+            parts.append(input_data["replace"])
+            last_end = start_offset
+        parts.append(content[:last_end])
+        next_content = "".join(reversed(parts))
     else:
         start_offset, end_offset = matches[0]
         next_content = content[:start_offset] + input_data["replace"] + content[end_offset:]
-    
+
     return apply_reviewed_file_change(context, input_data["path"], target, next_content)
 
 

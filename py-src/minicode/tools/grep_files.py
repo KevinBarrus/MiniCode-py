@@ -6,7 +6,9 @@ with AST-aware filtering, glob patterns, and context lines.
 from __future__ import annotations
 
 import fnmatch
+import functools
 import re
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -98,28 +100,29 @@ def _search_file(
         return None
     
     lines = content.splitlines()
+    total_lines = len(lines)
     matches = []
-    
+
     for line_num, line in enumerate(lines, start=1):
         if regex.search(line):
             # Build context
             context_before = []
             context_after = []
-            
+
             if context_lines > 0:
-                for i in range(max(0, line_num - 1 - context_lines), line_num - 1):
-                    context_before.append({
-                        "line": i + 1,
-                        "text": lines[i],
-                        "is_match": False,
-                    })
-                for i in range(line_num, min(len(lines), line_num + context_lines)):
-                    context_after.append({
-                        "line": i + 1,
-                        "text": lines[i],
-                        "is_match": False,
-                    })
-            
+                start_ctx = max(0, line_num - 1 - context_lines)
+                end_ctx = line_num - 1
+                context_before = [
+                    {"line": i + 1, "text": lines[i], "is_match": False}
+                    for i in range(start_ctx, end_ctx)
+                ]
+                start_after = line_num
+                end_after = min(total_lines, line_num + context_lines)
+                context_after = [
+                    {"line": i + 1, "text": lines[i], "is_match": False}
+                    for i in range(start_after, end_after)
+                ]
+
             matches.append({
                 "line": line_num,
                 "text": line,
@@ -127,7 +130,7 @@ def _search_file(
                 "context_before": context_before,
                 "context_after": context_after,
             })
-    
+
     return matches if matches else None
 
 

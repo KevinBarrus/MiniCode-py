@@ -23,7 +23,7 @@ def _truncate_large_output(output: str, max_chars: int = MAX_OUTPUT_CHARS) -> st
     """Truncate very large command output to prevent context bloat."""
     if len(output) <= max_chars:
         return output
-    
+
     lines = output.split("\n")
     total_lines = len(lines)
     # Keep head (first 60%) and tail (last 40%)
@@ -32,7 +32,7 @@ def _truncate_large_output(output: str, max_chars: int = MAX_OUTPUT_CHARS) -> st
     if tail_lines > int(total_lines * 0.4):
         tail_lines = int(total_lines * 0.4)
         head_lines = total_lines - tail_lines
-    
+
     head = "\n".join(lines[:head_lines])
     tail = "\n".join(lines[-tail_lines:])
     omitted = total_lines - head_lines - tail_lines
@@ -89,21 +89,24 @@ DEVELOPMENT_COMMANDS = {
 }
 
 
-def split_command_line(command_line: str) -> list[str]:
+@functools.lru_cache(maxsize=256)
+def split_command_line(command_line: str) -> tuple[str, ...]:
     """Split a command string into tokens.
 
     On Windows, ``shlex.split(posix=True)`` can choke on backslash paths
     (e.g. ``C:\\Users\\foo``).  We fall back to ``posix=False`` which
     preserves backslashes, then try the native ``shlex.split`` as a
     last resort.
+
+    结果缓存为 tuple 以支持 @lru_cache。
     """
     if os.name == "nt":
         try:
-            return shlex.split(command_line, posix=False)
+            return tuple(shlex.split(command_line, posix=False))
         except ValueError:
             # If even non-posix fails, fall back to simple whitespace split
-            return command_line.split()
-    return shlex.split(command_line, posix=True)
+            return tuple(command_line.split())
+    return tuple(shlex.split(command_line, posix=True))
 
 
 def _is_allowed_command(command: str) -> bool:
@@ -129,7 +132,9 @@ def _strip_trailing_background_operator(command: str) -> str:
     return command.strip().removesuffix("&").strip()
 
 
+@functools.lru_cache(maxsize=128)
 def _classify_shell_snippet_risk(command: str) -> str | None:
+    """缓存 shell 片段风险分类结果，避免重复正则匹配"""
     lowered = command.lower()
     collapsed = re.sub(r"\s+", " ", lowered).strip()
     if re.search(r"\brm\s+-[a-z]*r[a-z]*f\b|\brm\s+-[a-z]*f[a-z]*r\b", collapsed):
@@ -155,7 +160,7 @@ def _normalize_command_input(input_data: dict) -> tuple[str, list[str]]:
     if raw_args:
         return command, [str(arg) for arg in raw_args]
     parsed = split_command_line(command) if command else []
-    return (parsed[0], parsed[1:]) if parsed else ("", [])
+    return (parsed[0], list(parsed[1:])) if parsed else ("", [])
 
 
 def _is_windows_shell_builtin(command: str) -> bool:
@@ -277,13 +282,13 @@ def _run(input_data: dict, context) -> ToolResult:
             stdin=subprocess.DEVNULL,
             **popen_kwargs,
         )
-        
+
         if child.pid is None:
             return ToolResult(
                 ok=False,
                 output="Failed to get PID for background command. Process may have exited immediately.",
             )
-        
+
         background_task = register_background_shell_task(
             command=_strip_trailing_background_operator(input_data["command"]),
             pid=child.pid,
@@ -299,10 +304,10 @@ def _run(input_data: dict, context) -> ToolResult:
         try:
             import pty
             import select
-            
+
             master_fd, slave_fd = pty.openpty()
             effective_timeout = input_data.get("timeout") or COMMAND_TIMEOUT
-            
+
             process = subprocess.Popen(
                 [command, *args],
                 cwd=effective_cwd,
@@ -312,11 +317,11 @@ def _run(input_data: dict, context) -> ToolResult:
                 stderr=slave_fd,
                 start_new_session=True,
             )
-            
+
             os.close(slave_fd)
             output_bytes = bytearray()
             timed_out = False
-            
+
             try:
                 while True:
                     r, _, _ = select.select([master_fd], [], [], effective_timeout)
@@ -325,7 +330,7 @@ def _run(input_data: dict, context) -> ToolResult:
                         process.kill()
                         process.wait()
                         break
-                    
+
                     try:
                         data = os.read(master_fd, 4096)
                         if not data:
@@ -338,18 +343,18 @@ def _run(input_data: dict, context) -> ToolResult:
                 os.close(master_fd)
                 if not timed_out:
                     process.wait()
-                
+
             output_str = output_bytes.decode("utf-8", errors="replace").strip()
             output_str = output_str.replace("\r\n", "\n")
             output_str = _truncate_large_output(output_str)
-            
+
             if timed_out:
                 return ToolResult(
                     ok=False,
                     output=f"Command timed out after {effective_timeout} seconds (process killed).\nPartial output:\n{output_str}",
                 )
             return ToolResult(ok=process.returncode == 0, output=output_str)
-            
+
         except ImportError:
             pass  # Fallback to subprocess on systems without pty
 

@@ -158,11 +158,10 @@ def _run(input_data: dict, context) -> ToolResult:
         py_files = [target]
     else:
         skip_dirs = {".git", "__pycache__", "venv", "env", ".tox", "node_modules"}
-        for root, dirs, files in os.walk(target):
-            dirs[:] = [d for d in dirs if d not in skip_dirs]
-            for f in files:
-                if f.endswith(".py"):
-                    py_files.append(Path(root) / f)
+        for p in target.rglob("*.py"):
+            if any(part in skip_dirs for part in p.relative_to(target).parts[:-1]):
+                continue
+            py_files.append(p)
 
     all_issues = []
     files_reviewed = 0

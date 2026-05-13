@@ -26,7 +26,7 @@ def _format_time(timestamp: float) -> str:
     dt = datetime.fromtimestamp(timestamp)
     now = time.time()
     diff = now - timestamp
-    
+
     if diff < 3600:
         mins = int(diff / 60)
         return f"{mins}m ago"
@@ -78,7 +78,7 @@ def _get_file_status_color(file_path: Path) -> str:
     """Get status indicator based on file modification time."""
     now = time.time()
     age = now - file_path.stat().st_mtime
-    
+
     if age < 3600:  # Modified within 1 hour
         return "🟢"
     elif age < 86400:  # Modified within 24 hours
@@ -99,33 +99,33 @@ def _build_tree(
     """Build file tree with proper formatting."""
     if ignore_dirs is None:
         ignore_dirs = {'.git', '__pycache__', 'venv', 'env', '.tox', 'node_modules', '.mypy_cache', '.pytest_cache'}
-    
+
     lines = []
-    
+
     try:
         entries = sorted(path.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
     except PermissionError:
         return [f"{prefix}{'└── ' if is_last else '├── '}🔒 Permission denied"]
-    
+
     # Filter hidden files
     if not show_hidden:
         entries = [e for e in entries if not e.name.startswith('.')]
-    
+
     # Filter ignored directories
     if path.is_dir():
         entries = [e for e in entries if not (e.is_dir() and e.name in ignore_dirs)]
-    
+
     for i, entry in enumerate(entries):
         is_last_entry = (i == len(entries) - 1)
-        
+
         # Choose connector
         connector = "└── " if is_last_entry else "├── "
         extension = "    " if is_last_entry else "│   "
-        
+
         if entry.is_dir():
             icon = "📁"
             lines.append(f"{prefix}{connector}{icon} {entry.name}")
-            
+
             if current_depth < max_depth:
                 lines.extend(_build_tree(
                     entry,
@@ -141,11 +141,12 @@ def _build_tree(
         else:
             icon = _get_file_icon(entry)
             status = _get_file_status_color(entry)
-            size = _format_size(entry.stat().st_size)
-            mod_time = _format_time(entry.stat().st_mtime)
-            
+            entry_stat = entry.stat()
+            size = _format_size(entry_stat.st_size)
+            mod_time = _format_time(entry_stat.st_mtime)
+
             lines.append(f"{prefix}{connector}{status} {icon} {entry.name} ({size}, {mod_time})")
-    
+
     return lines
 
 
@@ -161,9 +162,9 @@ def _validate(input_data: dict) -> dict:
     show_hidden = input_data.get("show_hidden", False)
     if not isinstance(show_hidden, bool):
         raise ValueError("show_hidden must be a boolean")
-    
+
     pattern = input_data.get("pattern")
-    
+
     return {
         "path": path,
         "max_depth": max_depth,
@@ -181,17 +182,17 @@ def _run(input_data: dict, context) -> ToolResult:
     max_depth = input_data["max_depth"]
     show_hidden = input_data["show_hidden"]
     pattern = input_data.get("pattern")
-    
+
     if not target.exists():
         return ToolResult(ok=False, output=f"Path not found: {target}")
-    
+
     # Build tree
     tree_lines = _build_tree(
         target,
         max_depth=max_depth,
         show_hidden=show_hidden,
     )
-    
+
     # Apply pattern filter if provided
     if pattern:
         import fnmatch
@@ -204,7 +205,7 @@ def _run(input_data: dict, context) -> ToolResult:
                 ok=True,
                 output=f"No files match pattern '{pattern}'",
             )
-    
+
     # Count stats
     try:
         total_files = sum(1 for _ in target.rglob("*") if _.is_file() and not _.name.startswith('.'))
@@ -212,14 +213,14 @@ def _run(input_data: dict, context) -> ToolResult:
     except Exception:
         total_files = 0
         total_dirs = 0
-    
+
     # Format output
     lines = [
         f"📂 File Tree: {input_data['path']}",
         "=" * 60,
         "",
     ]
-    
+
     # Add target name at root
     if target.is_dir():
         lines.append(f"📁 {target.name}")
@@ -228,7 +229,7 @@ def _run(input_data: dict, context) -> ToolResult:
     else:
         for line in tree_lines:
             lines.append(line)
-    
+
     lines.extend([
         "",
         "-" * 60,
@@ -237,7 +238,7 @@ def _run(input_data: dict, context) -> ToolResult:
         f"  Directories: {total_dirs}",
         f"  Max depth shown: {max_depth}",
     ])
-    
+
     # Legend
     lines.extend([
         "",
@@ -246,7 +247,7 @@ def _run(input_data: dict, context) -> ToolResult:
         "  🟡 Modified < 24h ago",
         "  ⚪ Modified > 24h ago",
     ])
-    
+
     return ToolResult(ok=True, output="\n".join(lines))
 
 

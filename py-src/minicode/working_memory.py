@@ -17,7 +17,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from minicode.context_manager import estimate_tokens
+from minicode.token_estimation import estimate_tokens
 
 
 @dataclass

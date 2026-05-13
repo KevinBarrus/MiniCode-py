@@ -23,7 +23,7 @@ ALLOWED_COMMANDS = frozenset({
     'node', 'npm', 'npx', 'python', 'python3', 'pip', 'pip3',
     'uv', 'deno', 'bun', 'cargo', 'go', 'java', 'javac',
     'ruby', 'gem', 'dotnet', 'curl', 'wget',
-}
+})
 
 
 JsonRpcProtocol = str

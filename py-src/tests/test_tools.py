@@ -27,7 +27,7 @@ def test_split_command_line_supports_quotes() -> None:
     import os
 
     result = split_command_line("git commit -m 'hello world'")
-    assert result[:3] == ["git", "commit", "-m"]
+    assert result[:3] == ("git", "commit", "-m")
     # On Windows, shlex.split(posix=False) preserves the quotes around
     # the argument; on Unix, posix=True strips them.
     if os.name == "nt":

@@ -8,7 +8,6 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Protocol
-from abc import abstractmethod
 
 logger = logging.getLogger("minicode.tooling")
 
@@ -104,11 +103,10 @@ def _smart_truncate_output(output: str, tool_name: str, max_chars: int | None = 
         head_lines = max(1, int(max_lines * 0.4))
         tail_lines = max(1, int(max_lines * 0.4))
         
-        # Also extract error/warning lines
-        error_pattern = re.compile(r'(?i)(error|fail|exception|traceback|warning)', re.IGNORECASE)
+        # Also extract error/warning lines (use module-level precompiled pattern)
         error_lines = [
             (i, line) for i, line in enumerate(lines)
-            if error_pattern.search(line) and head_lines <= i < total_lines - tail_lines
+            if _ERROR_PATTERN.search(line) and head_lines <= i < total_lines - tail_lines
         ]
         error_text = ""
         if error_lines:

@@ -13,7 +13,6 @@ Search uses TF-IDF relevance scoring for intelligent retrieval.
 
 from __future__ import annotations
 
-import functools
 import json
 import logging
 import math
@@ -24,6 +23,7 @@ import threading
 from collections import Counter, OrderedDict
 from dataclasses import dataclass, field
 from enum import Enum
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -307,15 +307,18 @@ def _expand_query_terms(terms: list[str]) -> list[str]:
     return expanded
 
 
-def _tokenize(text: str) -> list[str]:
+@lru_cache(maxsize=1024)
+def _tokenize(text: str) -> tuple[str, ...]:
     """Tokenize text into words for TF-IDF scoring.
 
     Handles alphanumeric words, individual CJK characters, and CJK bigrams
     for better Chinese text semantic matching.
+
+    使用 @lru_cache 缓存分词结果，返回 tuple 以支持缓存。
     """
     tokens = [w.lower() for w in _WORD_RE.findall(text)]
     cjk_bigrams = [match.lower() for match in _CJK_BIGRAM_RE.findall(text)]
-    return tokens + cjk_bigrams
+    return tuple(tokens + cjk_bigrams)
 
 
 # BM25 parameters

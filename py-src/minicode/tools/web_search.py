@@ -2,11 +2,40 @@ from __future__ import annotations
 
 import functools
 import json
+import re
 import urllib.request
 import urllib.parse
 from minicode.tooling import ToolDefinition, ToolResult
 
 MAX_RESULTS = 10
+
+
+# 预编译正则表达式，避免每次解析时重复编译
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+_RESULT_PATTERN = re.compile(
+    r'<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)</a>.*?'
+    r'<a[^>]*class="result__snippet"[^>]*>(.*?)</a>',
+    re.DOTALL,
+)
+
+_ENTITY_REPLACEMENTS = (
+    ("&amp;", "&"),
+    ("&quot;", '"'),
+    ("&#x27;", "'"),
+    ("&#39;", "'"),
+    ("&lt;", "<"),
+    ("&gt;", ">"),
+    ("&nbsp;", " "),
+)
+
+
+@functools.lru_cache(maxsize=64)
+def _clean_html_text(text: str) -> str:
+    """清理 HTML 文本，缓存结果避免重复处理"""
+    text = _HTML_TAG_RE.sub("", text).strip()
+    for old, new in _ENTITY_REPLACEMENTS:
+        text = text.replace(old, new)
+    return text
 
 
 def _validate(input_data: dict) -> dict:
@@ -71,34 +100,6 @@ def _run(input_data: dict, context) -> ToolResult:
             ok=False,
             output=f"Search error: {e}\nQuery: {query}",
         )
-
-
-_HTML_TAG_RE = re.compile(r"<[^>]+>")
-_ENTITY_REPLACEMENTS = (
-    ("&amp;", "&"),
-    ("&quot;", '"'),
-    ("&#x27;", "'"),
-    ("&#39;", "'"),
-    ("&lt;", "<"),
-    ("&gt;", ">"),
-    ("&nbsp;", " "),
-)
-
-
-@functools.lru_cache(maxsize=64)
-def _clean_html_text(text: str) -> str:
-    """清理 HTML 文本，缓存结果避免重复处理"""
-    text = _HTML_TAG_RE.sub("", text).strip()
-    for old, new in _ENTITY_REPLACEMENTS:
-        text = text.replace(old, new)
-    return text
-
-
-_RESULT_PATTERN = re.compile(
-    r'<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)</a>.*?'
-    r'<a[^>]*class="result__snippet"[^>]*>(.*?)</a>',
-    re.DOTALL,
-)
 
 
 def _parse_duckduckgo_results(html: str, max_results: int) -> list[dict[str, str]]:

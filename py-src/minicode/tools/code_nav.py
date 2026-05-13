@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import ast
-import os
 from pathlib import Path
 from typing import Any
 from minicode.tooling import ToolDefinition, ToolResult
@@ -35,6 +34,7 @@ def _extract_symbols_from_file(file_path: Path) -> list[dict[str, Any]]:
         return []
 
     symbols = []
+    _unparse = ast.unparse  # 局部变量绑定，避免重复属性查找
 
     for node in ast.walk(tree):
         symbol_type = _get_symbol_type(node)
@@ -54,31 +54,35 @@ def _extract_symbols_from_file(file_path: Path) -> list[dict[str, Any]]:
 
         # Get arguments for functions
         args = []
-        if symbol_type == "function" and hasattr(node, "args"):
-            for arg in node.args.args:
-                arg_name = arg.arg
-                arg_type = ""
-                if arg.annotation:
-                    try:
-                        arg_type = ast.unparse(arg.annotation)
-                    except Exception:
-                        arg_type = "?"
-                args.append(f"{arg_name}: {arg_type}" if arg_type else arg_name)
+        if symbol_type == "function":
+            node_args = getattr(node, "args", None)
+            if node_args:
+                for arg in node_args.args:
+                    arg_name = arg.arg
+                    arg_type = ""
+                    if arg.annotation:
+                        try:
+                            arg_type = _unparse(arg.annotation)
+                        except Exception:
+                            arg_type = "?"
+                    args.append(f"{arg_name}: {arg_type}" if arg_type else arg_name)
 
         # Get decorators
         decorators = []
-        for dec in getattr(node, "decorator_list", []):
+        dec_list = getattr(node, "decorator_list", ())
+        for dec in dec_list:
             try:
-                decorators.append(ast.unparse(dec))
+                decorators.append(_unparse(dec))
             except Exception:
                 decorators.append("?")
 
         # Get class bases
         bases = []
-        if symbol_type == "class" and hasattr(node, "bases"):
-            for base in node.bases:
+        if symbol_type == "class":
+            node_bases = getattr(node, "bases", ())
+            for base in node_bases:
                 try:
-                    bases.append(ast.unparse(base))
+                    bases.append(_unparse(base))
                 except Exception:
                     bases.append("?")
 
@@ -87,9 +91,9 @@ def _extract_symbols_from_file(file_path: Path) -> list[dict[str, Any]]:
             "name": name,
             "line": lineno,
             "docstring": docstring_preview,
-            "args": args if symbol_type == "function" else [],
+            "args": args,
             "decorators": decorators,
-            "bases": bases if symbol_type == "class" else [],
+            "bases": bases,
         })
 
     return symbols
@@ -158,12 +162,12 @@ def _run_find_symbols(input_data: dict, context) -> ToolResult:
         py_files = [search_path]
     else:
         skip_dirs = {".git", "__pycache__", "venv", "env", ".tox", "node_modules"}
-        for root, dirs, files in os.walk(search_path):
-            # Skip common non-source dirs
-            dirs[:] = [d for d in dirs if d not in skip_dirs]
+        for root, dirs, files in search_path.rglob("*"):
+            if root.name in skip_dirs:
+                continue
             for f in files:
-                if f.endswith(".py"):
-                    py_files.append(Path(root) / f)
+                if f.name.endswith(".py"):
+                    py_files.append(f)
 
     all_symbols = []
     for py_file in py_files:
@@ -234,11 +238,12 @@ def _run_find_references(input_data: dict, context) -> ToolResult:
         py_files = [search_path]
     else:
         skip_dirs = {".git", "__pycache__", "venv", "env", ".tox", "node_modules"}
-        for root, dirs, files in os.walk(search_path):
-            dirs[:] = [d for d in dirs if d not in skip_dirs]
+        for root, dirs, files in search_path.rglob("*"):
+            if root.name in skip_dirs:
+                continue
             for f in files:
-                if f.endswith(".py"):
-                    py_files.append(Path(root) / f)
+                if f.name.endswith(".py"):
+                    py_files.append(f)
 
     all_refs = []
     for py_file in py_files:

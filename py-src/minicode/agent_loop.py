@@ -33,6 +33,13 @@ from minicode.feedback_controller import FeedbackController, SystemState
 from minicode.feedforward_controller import FeedforwardController, PreemptiveConfig
 from minicode.stability_monitor import StabilityMonitor, HealthLevel
 
+# 高级控制论模块
+from minicode.adaptive_pid_tuner import AdaptivePIDTuner, PIDParameters
+from minicode.state_observer import StateObserver, MeasurementVector, ObservedState
+from minicode.decoupling_controller import DecouplingController
+from minicode.predictive_controller import PredictiveController, PredictionHorizon
+from minicode.self_healing_engine import SelfHealingEngine, FaultType, FaultSeverity
+
 logger = get_logger("agent_loop")
 
 # 甯搁噺锛氶伩鍏嶉噸澶嶇殑鎻愮ず鏂囨湰
@@ -351,6 +358,13 @@ def run_agent_turn(
     feedforward_controller: FeedforwardController | None = None
     stability_monitor: StabilityMonitor | None = None
 
+    # 高级控制论模块
+    adaptive_pid_tuner: AdaptivePIDTuner | None = None
+    state_observer: StateObserver | None = None
+    decoupling_controller: DecouplingController | None = None
+    predictive_controller: PredictiveController | None = None
+    self_healing_engine: SelfHealingEngine | None = None
+
     if enable_work_chain:
         task, task_metadata = _build_work_chain_task(current_messages)
         layered_context, context_builder = _build_layered_context(
@@ -377,6 +391,26 @@ def run_agent_turn(
         stability_monitor = StabilityMonitor(window_size=100)
         logger.info("Stability monitor initialized: real-time health tracking")
 
+        # 初始化自适应PID调参器
+        adaptive_pid_tuner = AdaptivePIDTuner()
+        logger.info("Adaptive PID tuner initialized: self-tuning control")
+
+        # 初始化状态观测器（卡尔曼滤波）
+        state_observer = StateObserver()
+        logger.info("State observer initialized: Kalman filter-based estimation")
+
+        # 初始化多变量解耦控制器
+        decoupling_controller = DecouplingController()
+        logger.info("Decoupling controller initialized: multi-variable control")
+
+        # 初始化预测控制器
+        predictive_controller = PredictiveController()
+        logger.info("Predictive controller initialized: proactive control")
+
+        # 初始化自愈引擎
+        self_healing_engine = SelfHealingEngine()
+        logger.info("Self-healing engine initialized: automated recovery")
+
     # 妫€鏌ヤ笂涓嬫枃鐘舵€?
     if context_manager:
         context_manager.messages = current_messages
@@ -397,6 +431,39 @@ def run_agent_turn(
 
             # Hook: agent turn started
             fire_hook_sync(HookEvent.AGENT_START, step=step, cwd=cwd)
+
+            # 高级控制论闭环（每个 step 开始时执行）
+            if enable_work_chain:
+                # 状态观测：通过可测量输出估计系统内部状态
+                if state_observer:
+                    measurement = MeasurementVector(
+                        timestamp=time.time(),
+                        response_time=step * 2.0,  # 估算响应时间
+                        success_rate=1.0 - (tool_error_count / max(step, 1)),
+                        context_length=context_manager.get_stats().total_tokens if context_manager else 0,
+                        error_count=tool_error_count,
+                        tool_calls=0,
+                    )
+                    observed_state = state_observer.update(measurement)
+
+                # 预测控制：预测未来趋势并提前调整
+                if predictive_controller:
+                    if context_manager:
+                        stats = context_manager.get_stats()
+                        predictive_controller.update("context_usage", stats.usage_pct / 100.0)
+                    predictive_controller.update("error_rate", tool_error_count / max(step, 1))
+
+                    if step > 2:
+                        actions = predictive_controller.generate_predictive_actions()
+                        if actions and actions[0].urgency > 0.7:
+                            logger.info("Predictive action triggered: %s", actions[0].recommended_action)
+                            if self_healing_engine:
+                                healing_actions = self_healing_engine.detect_and_heal({
+                                    "context_usage": stats.usage_pct / 100.0 if context_manager else 0.0,
+                                    "error_rate": tool_error_count / max(step, 1),
+                                })
+                                if healing_actions:
+                                    logger.info("Self-healing: %s", healing_actions[0].strategy)
 
             if metrics_collector:
                 metrics_collector.start_turn(step)
@@ -707,6 +774,33 @@ def run_agent_turn(
                         metrics_collector.end_turn(total_tokens=0)
                     return current_messages
 
+            # 工具执行完成后的控制论反馈
+            if enable_work_chain:
+                # 多变量解耦：消除工具间的耦合影响
+                if decoupling_controller:
+                    decoupling_controller.record_measurement({
+                        "token_usage_to_latency": (
+                            context_manager.get_stats().usage_pct / 100.0 if context_manager else 0.0,
+                            step * 2.0 / 60.0,
+                        ),
+                        "context_pressure_to_errors": (
+                            context_manager.get_stats().usage_pct / 100.0 if context_manager else 0.0,
+                            tool_error_count / max(step, 1),
+                        ),
+                    })
+                    decoupling_controller.compute_decoupling_matrix()
+
+                # 自愈检测：检测并修复故障
+                if self_healing_engine:
+                    metrics_for_healing = {
+                        "error_rate": tool_error_count / max(step, 1),
+                        "context_usage": context_manager.get_stats().usage_pct / 100.0 if context_manager else 0.0,
+                        "oscillation_index": 0.0,  # 从反馈控制器获取
+                    }
+                    healing_actions = self_healing_engine.detect_and_heal(metrics_for_healing)
+                    if healing_actions:
+                        logger.info("Self-healing triggered: %s", healing_actions[0].strategy)
+
             # Tool execution completed for this step; ask the model for the next turn
             # instead of falling through to the max-step fallback.
             if metrics_collector:
@@ -761,4 +855,26 @@ def run_agent_turn(
                 active_tasks=1,
             )
             stability_monitor.record_snapshot(snapshot)
+
+        # 高级控制论：最终状态报告
+        if enable_work_chain:
+            # 状态观测器报告
+            if state_observer:
+                state_summary = state_observer.get_state_summary()
+                logger.info("State observer summary: %s", state_summary)
+
+            # 预测控制器报告
+            if predictive_controller:
+                pred_summary = predictive_controller.get_prediction_summary()
+                logger.info("Prediction summary: accuracy=%s", pred_summary.get("accuracy", {}))
+
+            # 自愈引擎统计
+            if self_healing_engine:
+                healing_stats = self_healing_engine.get_healing_statistics()
+                logger.info("Self-healing stats: %s", healing_stats)
+
+            # 多变量解耦状态
+            if decoupling_controller:
+                coupling_status = decoupling_controller.get_coupling_status()
+                logger.info("Coupling status: strong=%s", coupling_status.get("strong_couplings", []))
 

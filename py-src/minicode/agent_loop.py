@@ -40,6 +40,14 @@ from minicode.decoupling_controller import DecouplingController
 from minicode.predictive_controller import PredictiveController, PredictionHorizon
 from minicode.self_healing_engine import SelfHealingEngine, FaultType, FaultSeverity
 
+# 上下文管理集成 (Claude Code-style)
+from minicode.context_compactor import (
+    ContextCompactor,
+    AutoCompactConfig,
+    CompactTrigger,
+    CompactStrategy,
+)
+
 logger = get_logger("agent_loop")
 
 # 甯搁噺锛氶伩鍏嶉噸澶嶇殑鎻愮ず鏂囨湰
@@ -411,15 +419,43 @@ def run_agent_turn(
         self_healing_engine = SelfHealingEngine()
         logger.info("Self-healing engine initialized: automated recovery")
 
-    # 妫€鏌ヤ笂涓嬫枃鐘舵€?
+        # 初始化上下文管理器 (Claude Code-style 三段式)
+        context_compactor: ContextCompactor | None = None
+        if context_manager:
+            compact_config = AutoCompactConfig(
+                threshold_ratio=0.85,
+                circuit_breaker_limit=3,
+                session_memory_enabled=True,
+            )
+            context_compactor = ContextCompactor(
+                context_window=context_manager.context_window,
+                workspace=cwd,
+                memory_manager=None,  # Will be linked if memory available
+                estimate_fn=estimate_message_tokens,
+                config=compact_config,
+            )
+            logger.info("ContextCompactor initialized: Claude Code-style pipeline")
+
+    # 检查上下文状态 + 运行 Claude Code-style 预请求优化管线
     if context_manager:
         context_manager.messages = current_messages
         stats = context_manager.get_stats()
-        logger.info("Context: %d tokens (%.0f%%), %d messages", 
+        logger.info("Context: %d tokens (%.0f%%), %d messages",
                    stats.total_tokens, stats.usage_percentage, stats.messages_count)
-        
-        # 濡傛灉闇€瑕佸帇缂╋紝鑷姩鎵ц
-        if context_manager.should_auto_compact():
+
+        # 运行完整预请求优化管线 (Tool Budget → Microcompact → Auto Compact)
+        if context_compactor:
+            compaction_result = context_compactor.process_request(current_messages)
+            if compaction_result.effective:
+                current_messages = compaction_result.messages
+                context_manager.messages = current_messages
+                logger.info(
+                    "ContextCompactor: %s freed %d tokens [%s]",
+                    compaction_result.strategy.value,
+                    compaction_result.tokens_freed,
+                    compaction_result.summary_text[:80],
+                )
+        elif context_manager.should_auto_compact():
             logger.warning("Context near limit, auto-compacting...")
             current_messages = context_manager.compact_messages()
             if on_assistant_message:
@@ -501,6 +537,20 @@ def run_agent_turn(
                 error_type = type(error).__name__
                 fallback = f"Model API error ({error_type}): {error}"
                 logger.error("Model API error (%s): %s", error_type, error)
+
+                # Reactive Compact: 尝试从上下文溢出中恢复
+                if context_compactor and "prompt" in str(error).lower() or "too long" in str(error).lower():
+                    recovery_result = context_compactor.reactive_recover(current_messages, str(error))
+                    if recovery_result and recovery_result.effective:
+                        current_messages = recovery_result.messages
+                        if context_manager:
+                            context_manager.messages = current_messages
+                        logger.info(
+                            "Reactive Compact recovered: freed %d tokens",
+                            recovery_result.tokens_freed,
+                        )
+                        continue  # Retry with compacted messages
+
                 if on_assistant_message:
                     on_assistant_message(fallback)
                 current_messages.append({"role": "assistant", "content": fallback})
@@ -883,4 +933,18 @@ def run_agent_turn(
             if decoupling_controller:
                 coupling_status = decoupling_controller.get_coupling_status()
                 logger.info("Coupling status: strong=%s", coupling_status.get("strong_couplings", []))
+
+        # 上下文管理管线统计 (Claude Code-style)
+        if context_compactor:
+            compactor_stats = context_compactor.get_stats()
+            logger.info(
+                "ContextCompactor: passes=%d persisted=%d dedup=%d "
+                "microcompact=%d boundaries=%d circuit=%s",
+                compactor_stats["total_passes"],
+                compactor_stats["tool_results_persisted"],
+                compactor_stats["read_dedup_entries"],
+                compactor_stats["microcompact_tokens_cleared"],
+                compactor_stats["auto_compact_boundaries"],
+                "TRIPPED" if compactor_stats["circuit_breaker_tripped"] else "OK",
+            )
 

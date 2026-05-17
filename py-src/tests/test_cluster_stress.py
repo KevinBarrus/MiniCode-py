@@ -367,7 +367,7 @@ class TestResourceLimits:
 
     def test_context_manager_under_load(self):
         """Test context manager with many messages."""
-        cm = ContextManager(model_name="gpt-4o")
+        cm = ContextManager(model="gpt-4o")
 
         # Add many messages to simulate long conversation
         for i in range(100):

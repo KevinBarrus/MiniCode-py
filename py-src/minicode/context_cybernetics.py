@@ -670,6 +670,8 @@ class ContextCyberneticsOrchestrator:
             return messages, None, None
 
         self._cycle_count += 1
+        self._last_error_rate = error_rate
+        self._last_avg_latency = avg_latency
 
         estimate_fn = self.compactor._estimate
         total_tokens = sum(estimate_fn(m) for m in messages)
@@ -796,3 +798,47 @@ class ContextCyberneticsOrchestrator:
         self._cycle_count = 0
         self._last_action = None
         self._last_result = None
+
+    def feed_from_stability_monitor(
+        self,
+        context_usage: float = 0.0,
+        error_rate: float = 0.0,
+        avg_latency: float = 0.0,
+        cpu_usage: float = 0.0,
+        memory_usage: float = 0.0,
+    ) -> None:
+        """Bridge: ingest data from StabilityMonitor MetricSnapshot.
+
+        Feeds the stability monitor's metrics into the adaptive threshold
+        manager's coupling analysis, enabling RGA-based threshold adjustment
+        based on real system-level observations.
+        """
+        self.update_coupling_metrics(error_rate=error_rate, avg_latency=avg_latency)
+
+    def to_system_state(self) -> "SystemState":
+        """Bridge: convert internal state to FeedbackController.SystemState.
+
+        Forms the upper layer of a dual-PID control architecture:
+          Layer 1 (this module): ContextPIDController → ContextCompactor
+          Layer 2 (feedback_controller): FeedbackController → agent behavior tuning
+
+        The SystemState output from this method feeds into FeedbackController.observe()
+        to close the outer control loop.
+        """
+        from .feedback_controller import SystemState
+
+        reading = self.sensor.get_recent_readings(1)[0] if self.sensor._history else None
+        fb_stats = self.feedback.get_stats()
+        pred_latest = self.predictor._predictions[-1] if self.predictor._predictions else None
+
+        return SystemState(
+            success_rate=fb_stats.get("effectiveness_rate", 1.0),
+            avg_response_time=getattr(self, '_last_avg_latency', 0.0),
+            token_efficiency=1.0 - max(0, (reading.usage_ratio if reading else 0) - 0.5),
+            context_usage=reading.usage_ratio if reading else 0.0,
+            error_frequency=getattr(self, '_last_error_rate', 0.0),
+            oscillation_index=1.0 if fb_stats.get("oscillation_detected") else 0.0,
+            skill_effectiveness=fb_stats.get("effectiveness_rate", 0.0),
+            pattern_reuse_rate=min(1.0, fb_stats.get("total_compactions", 0) / max(self._cycle_count, 1)),
+            knowledge_accumulation=min(1.0, self._cycle_count / 50.0),
+        )

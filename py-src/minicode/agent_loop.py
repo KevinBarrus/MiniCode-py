@@ -417,11 +417,8 @@ def run_agent_turn(
         predictive_controller = PredictiveController()
         logger.info("Predictive controller initialized: proactive control")
 
-        # 初始化自愈引擎
-        self_healing_engine = SelfHealingEngine()
-        logger.info("Self-healing engine initialized: automated recovery")
-
         # 初始化上下文管理器 (Claude Code-style + Engineering Cybernetics)
+        # 必须在 SelfHealingEngine 之前初始化，因为自愈引擎需要委托压缩操作
         context_compactor: ContextCompactor | None = None
         context_cybernetics: ContextCyberneticsOrchestrator | None = None
         if context_manager:
@@ -449,6 +446,10 @@ def run_agent_turn(
             if task and hasattr(task, 'parsed_intent') and task.parsed_intent:
                 context_cybernetics.set_intent(str(task.parsed_intent.intent_type))
             logger.info("ContextCybernetics initialized: PID control loop + predictive guard")
+
+        # 初始化自愈引擎（接收 cybernetics 引用用于 CONTEXT_OVERFLOW 委托）
+        self_healing_engine = SelfHealingEngine(orchestrator=context_cybernetics)
+        logger.info("Self-healing engine initialized: automated recovery + compaction delegation")
 
     # 检查上下文状态 + 运行 Claude Code-style 预请求优化管线
     if context_manager:
@@ -970,6 +971,8 @@ def run_agent_turn(
                 active_tasks=1,
             )
             stability_monitor.record_snapshot(snapshot)
+            if context_cybernetics:
+                stability_monitor.feed_orchestrator(context_cybernetics)
 
         # 高级控制论：最终状态报告
         if enable_work_chain:
@@ -1020,4 +1023,15 @@ def run_agent_turn(
                 cyber_stats["threshold"]["effective_threshold"] or 0,
                 (cyber_stats["feedback"]["effectiveness_rate"] or 0) * 100,
             )
+        # 双层 PID 闭环: Cybernetics → FeedbackController
+        if context_cybernetics and feedback_controller:
+            system_state = context_cybernetics.to_system_state()
+            control_signal = feedback_controller.observe(system_state)
+            if control_signal.force_compaction and context_cybernetics.enabled:
+                logger.info(
+                    "Dual-PID: FeedbackController force_compaction=True, "
+                    "stability=%.2f performance=%.2f",
+                    system_state.stability_score(),
+                    system_state.performance_score(),
+                )
 

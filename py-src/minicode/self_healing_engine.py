@@ -128,13 +128,15 @@ class SelfHealingEngine:
     - Healing effectiveness tracking and learning
     """
 
-    def __init__(self):
+    def __init__(self, orchestrator: "ContextCyberneticsOrchestrator | None" = None):
+        self._orchestrator = orchestrator
         self._strategies: dict[FaultType, list[HealingStrategy]] = {}
         self._fault_history: list[FaultRecord] = []
         self._healing_history: list[HealingAction] = []
         self._max_fault_history = 100
         self._max_healing_history = 200
         self._active_healing: dict[str, HealingAction] = {}
+        self._current_messages: list[dict] | None = None
 
         self._init_default_strategies()
 
@@ -158,9 +160,9 @@ class SelfHealingEngine:
 
         self._strategies[FaultType.CONTEXT_OVERFLOW] = [
             HealingStrategy(
-                "trigger_compaction",
+                "cybernetic_compaction",
                 FaultType.CONTEXT_OVERFLOW,
-                action=lambda: {"success": True, "action": "Triggered context compaction"},
+                action=self._execute_cybernetic_compaction,
                 expected_time=5.0,
                 success_probability=0.9,
             ),
@@ -286,6 +288,30 @@ class SelfHealingEngine:
                 triggered_actions.append(action)
 
         return triggered_actions
+
+    def set_current_messages(self, messages: list[dict]) -> None:
+        """Set the current messages for context overflow recovery."""
+        self._current_messages = messages
+
+    def _execute_cybernetic_compaction(self) -> dict[str, Any]:
+        """Execute real compaction via the cybernetics orchestrator.
+
+        Delegates to ContextCyberneticsOrchestrator.try_reactive_recover()
+        for intelligent context overflow recovery instead of a no-op shell.
+        """
+        if not self._orchestrator or not self._current_messages:
+            return {"success": False, "action": "No orchestrator or messages available"}
+
+        recovered_messages, result = self._orchestrator.try_reactive_recover(
+            self._current_messages, "context overflow detected by SelfHealingEngine"
+        )
+        if result and result.effective:
+            self._current_messages = recovered_messages
+            return {
+                "success": True,
+                "action": f"Cybernetic compaction: {result.tokens_freed} tokens freed, strategy={result.strategy.value}",
+            }
+        return {"success": False, "action": "Cybernetic compaction was ineffective"}
 
     def register_custom_strategy(self, strategy: HealingStrategy) -> None:
         fault_type = strategy.fault_type

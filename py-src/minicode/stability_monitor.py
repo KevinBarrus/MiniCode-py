@@ -185,6 +185,23 @@ class StabilityMonitor:
             return len(self._anomalies)
         return sum(1 for a in self._anomalies if a.timestamp >= since)
 
+    def feed_orchestrator(self, orchestrator: "ContextCyberneticsOrchestrator") -> None:
+        """Push latest MetricSnapshot into the cybernetics orchestrator.
+
+        Bridges StabilityMonitor (system-level observer) with
+        ContextCyberneticsOrchestrator (context-level controller),
+        enabling unified coupling analysis for adaptive threshold tuning.
+        """
+        latest = self._metrics[-1] if self._metrics else None
+        if latest and orchestrator is not None:
+            orchestrator.feed_from_stability_monitor(
+                context_usage=latest.context_usage,
+                error_rate=latest.error_rate,
+                avg_latency=latest.avg_latency,
+                cpu_usage=latest.cpu_usage,
+                memory_usage=latest.memory_usage,
+            )
+
     def _compute_health_score(self) -> float:
         """Compute overall health score from weighted metrics."""
         if not self._metrics:

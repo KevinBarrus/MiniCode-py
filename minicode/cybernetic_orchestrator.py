@@ -98,10 +98,9 @@ class CyberneticOrchestrator:
         # Memory + routing (set via wire_ methods)
         self.memory_ctrl: MemoryInjectionController | None = None
         self.model_ctrl: ModelSelectionController | None = None
-        self.memory_injector: MemoryInjector | None = None
-        self.smart_router = None  # SmartRouter
-        self.reflection = None  # ReflectionEngine
-        self.model_switcher = None  # ModelSwitcher
+        self.memory_pipeline: Any = None  # MemoryPipeline (unified facade)
+        self.smart_router = None
+        self.model_switcher = None
 
         self._initialized = False
 
@@ -146,12 +145,15 @@ class CyberneticOrchestrator:
         memory_mgr: MemoryManager,
         context_usage: float = 0.0,
     ) -> None:
-        """Wire memory manager into controllers that need it."""
-        if self.reflection:
-            self.reflection.memory = memory_mgr
-        self.memory_injector = MemoryInjector(
-            memory_manager=memory_mgr,
-            controller=self.memory_ctrl,
+        """Initialize unified memory pipeline."""
+        from minicode.memory_pipeline import MemoryPipeline
+
+        self.memory_pipeline = MemoryPipeline(memory_mgr)
+        # Pass model adapter if available for reranker
+        model_for_pipeline = getattr(self, '_last_model', None)
+        self.memory_pipeline.initialize(
+            model_adapter=model_for_pipeline,
+            workspace_path=getattr(self, '_workspace', None),
         )
 
     def wire_healing(
@@ -332,68 +334,39 @@ class CyberneticOrchestrator:
             except Exception:
                 pass
 
+        # Background memory optimization via unified pipeline
+        if self.memory_pipeline:
+            self.memory_pipeline.maintain()
+
         return summary
 
     # ── MEMORY INJECTION ────────────────────────────────────────────
 
     def inject_memories(
-        self, task_description: str, current_messages: list[dict]
+        self, task_description: str, current_messages: list[dict],
+        current_files: list[str] | None = None,
     ) -> list[dict]:
-        """Inject relevant memories into the system prompt. Returns updated messages."""
-        if not self.memory_injector:
+        """Inject relevant memories via unified pipeline."""
+        if not self.memory_pipeline:
             return current_messages
-        try:
-            injected = self.memory_injector.inject_for_task(task_description)
-            if injected:
-                memory_context = "\n## Injected Memory\n" + "\n".join(
-                    f"- {m.content[:200]}" for m in injected[:5]
-                )
-                for i, msg in enumerate(current_messages):
-                    if msg.get("role") == "system":
-                        current_messages[i] = {
-                            **msg,
-                            "content": msg["content"] + memory_context,
-                        }
-                        break
-        except Exception:
-            pass
-        return current_messages
+        return self.memory_pipeline.inject(task_description, current_files, current_messages)
 
     # ── REFLECTION ──────────────────────────────────────────────────
 
     def reflect_on_task(
-        self, task_description: str, step: int, tool_error_count: int
+        self, task_description: str, step: int, tool_error_count: int,
+        execution_trace: list[dict[str, Any]] | None = None,
     ) -> None:
-        """Run post-task reflection and learning."""
-        if not self.reflection:
+        """Post-task reflection via unified pipeline."""
+        if not self.memory_pipeline:
             return
-        try:
-            trace: list[dict[str, Any]] = [
-                {"type": "tool_call", "count": step},
-                {"type": "assistant", "steps": step},
-            ]
-            if tool_error_count > 0:
-                trace.append({"type": "error", "count": tool_error_count})
-            result = self.reflection.reflect(task_description, trace)
-            logger.info(
-                "Reflection: success=%s confidence=%.2f lessons=%d",
-                result.success, result.confidence, len(result.lessons_learned),
-            )
-            # Record outcome for routing feedback
-            if self.smart_router:
-                from minicode.smart_router import TaskOutcome
-                outcome = TaskOutcome(
-                    task_text=task_description,
-                    assigned_model="",
-                    success=(tool_error_count == 0),
-                    duration_ms=step * 2000.0,
-                    cost_usd=0.0,
-                    tool_errors=tool_error_count,
-                    model_switches=self.model_switcher.switch_count() if self.model_switcher else 0,
-                )
-                self.smart_router.learner().record_outcome(outcome)
-        except Exception:
-            pass
+        trace = execution_trace or [
+            {"type": "tool_call", "count": step},
+            {"type": "assistant", "steps": step},
+        ]
+        if tool_error_count > 0:
+            trace.append({"type": "error", "count": tool_error_count})
+        self.memory_pipeline.write(task_description, trace)
 
     # ── MODEL ROUTING ───────────────────────────────────────────────
 

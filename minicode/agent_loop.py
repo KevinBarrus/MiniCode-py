@@ -240,12 +240,27 @@ def _execute_single_tool(
         if store:
             store.set_state(set_busy(tool_name))
         
-        # Execute the tool (ToolRegistry.execute already has its own safety net)
-        result = tools.execute(
-            tool_name,
-            tool_input,
-            ToolContext(cwd=cwd, permissions=permissions, _runtime=runtime),
-        )
+        # Execute the tool with timeout protection
+        import concurrent.futures
+        TOOL_TIMEOUT = 120  # seconds
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(
+                    tools.execute,
+                    tool_name, tool_input,
+                    ToolContext(cwd=cwd, permissions=permissions, _runtime=runtime),
+                )
+                result = future.result(timeout=TOOL_TIMEOUT)
+        except concurrent.futures.TimeoutError:
+            result = ToolResult(
+                ok=False,
+                output=f"Tool '{tool_name}' timed out after {TOOL_TIMEOUT}s",
+            )
+        except Exception:
+            result = tools.execute(
+                tool_name, tool_input,
+                ToolContext(cwd=cwd, permissions=permissions, _runtime=runtime),
+            )  # Fallback: direct execution
         
         # Post-tool state updates (only for serial execution)
         if store:

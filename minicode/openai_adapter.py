@@ -222,7 +222,9 @@ class OpenAIModelAdapter:
                 response = error
                 if error.code not in RETRYABLE_STATUS or attempt >= max_retries:
                     break
-                wait = calculate_backoff(attempt)
+                from minicode.api_retry import classify_error
+                category = classify_error(error)
+                wait = calculate_backoff(attempt, error_category=category.value)
                 time.sleep(wait)
             except urllib.error.URLError:
                 if attempt >= max_retries:

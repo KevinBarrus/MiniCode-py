@@ -146,8 +146,15 @@ class LayeredContext:
         if removed > 0:
             logger.debug("Trimmed %d items from %s layer", removed, layer.value)
 
-    def _estimate_tokens(self, text: str) -> int:
-        return max(1, len(text) // 3)
+    @staticmethod
+    def _estimate_tokens(text: str) -> int:
+        """Estimate token count: ~4 chars/token (ASCII), ~1.5 chars/token (CJK).
+
+        Consistent with ContextManager's estimate_message_tokens formula.
+        """
+        cjk = sum(1 for ch in text if '一' <= ch <= '鿿' or '㐀' <= ch <= '䶿')
+        ascii_chars = len(text) - cjk
+        return max(1, int(ascii_chars / 4.0 + cjk / 1.5))
 
     def optimize(self) -> dict[str, Any]:
         stats = {"before_tokens": self.get_total_tokens(), "removed_items": 0, "merged_items": 0}

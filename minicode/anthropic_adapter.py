@@ -185,22 +185,24 @@ class AnthropicModelAdapter:
         response = None
         for attempt in range(max_retries + 1):
             try:
-                response = urllib.request.urlopen(request, timeout=60)  # noqa: S310
+                response = urllib.request.urlopen(request, timeout=60)
                 break
             except urllib.error.HTTPError as error:
                 response = error
                 if error.code not in RETRYABLE_STATUS or attempt >= max_retries:
                     break
+                # Use semantic error classification for adaptive backoff
+                from minicode.api_retry import classify_error
+                category = classify_error(error)
                 retry_after = _parse_retry_after_seconds(error.headers.get("retry-after"))
-                wait = calculate_backoff(attempt, retry_after=retry_after)
+                wait = calculate_backoff(attempt, retry_after=retry_after,
+                                        error_category=category.value)
                 time.sleep(wait)
             except urllib.error.URLError:
                 if attempt >= max_retries:
                     raise
                 wait = calculate_backoff(attempt)
                 time.sleep(wait)
-
-        if response is None:
             raise RuntimeError("Model request failed before receiving a response")
 
         if not on_stream_chunk:

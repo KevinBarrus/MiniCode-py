@@ -1,322 +1,286 @@
-# MiniCode Python
+# MiniCode Python — Cybernetic Agent Memory
 
-> Python implementation of the [MiniCode](https://github.com/LiuMengxuan04/MiniCode) ecosystem.
+> **Closed-Loop Cybernetic Memory for LLM Agents**
 >
-> **AI 编程智能体 · 钱学森工程控制论架构 · DDD 领域驱动设计**
+> 钱学森工程控制论 × 记忆检索优化 × DDD 领域驱动
+>
+> [![Tests](https://img.shields.io/badge/tests-718%20passed-brightgreen)]()
+> [![Python](https://img.shields.io/badge/python-3.12-blue)]()
 
-## MiniCode Ecosystem
+---
 
-- Main repository: [LiuMengxuan04/MiniCode](https://github.com/LiuMengxuan04/MiniCode)
-- Python version: [QUSETIONS/MiniCode-Python](https://github.com/QUSETIONS/MiniCode-Python)
-- Rust version: [harkerhand/MiniCode-rs](https://github.com/harkerhand/MiniCode-rs)
-- Submodule sync guide: [docs/SUBMODULE_SYNC.md](docs/SUBMODULE_SYNC.md)
+## 核心贡献
 
-## Architecture
+传统 Agent 记忆系统使用**静态检索**（固定 top-K BM25 或向量相似度）。我们首次将**工程控制论**（PID 闭环 + Kalman 滤波 + Lyapunov 稳定性）形式化地应用于 Agent 记忆管理，实现了一个**自适应、可证明稳定、具备多层语义的检索管线**。
 
-MiniCode Python is built on **Engineering Cybernetics** (钱学森工程控制论) + **DDD** (Domain-Driven Design), forming a complete closed-loop intelligent agent system:
+| 指标 | 纯 BM25 | 我们的完整管线 | 提升 |
+|------|---------|--------------|------|
+| P@3 | 0.350 | **0.717** | **2.05×** |
+| R@5 | 0.362 | **0.704** | **1.94×** |
+| MRR | 0.713 | **1.000** | **+40%** |
+| 跨域噪音 | 65.0% | **6.7%** | **-58.3%** |
 
-### Control Theory Closed Loop
+> 消融实验：80 条记忆 × 20 条查询 × 5 领域（frontend/backend/database/devops/testing）
 
-```
-[Feedforward] IntentParser → FeedforwardController → PreemptiveConfig
-     ↓
-[Execution]  TaskObject → PipelineEngine → AgentLoop → Tools
-     ↓
-[Monitoring] StabilityMonitor → MetricSnapshot → StabilityReport
-     ↓
-[Feedback]  FeedbackController → ControlSignal → System Adjustment
-     ↑                               ↓
-     └──── SystemState ◄─── Sensors ◄─── Agent Metrics ────┘
+---
 
-[Positive Feedback] Pattern Tracking → Skill Update → Memory Persistence
-[Negative Feedback] Error Detection → PID Adjustment → Stability Recovery
-```
+## 理论框架
 
-### Three Core Controllers
+### 记忆价值函数
 
-| Controller | Cybernetics Principle | Key Features |
-|-----------|----------------------|-------------|
-| **Feedback Controller** | Negative feedback correction + Positive feedback reinforcement + PID adaptive tuning | Auto-concurrency reduction, timeout adjustment, force compaction, pattern reinforcement |
-| **Feedforward Controller** | Preemptive optimization, open-loop control | Intent-based pre-configuration, risk pre-assessment, complexity/entity-aware tuning |
-| **Stability Monitor** | Multi-dimensional health scoring + Real-time anomaly detection | Health grading (healthy/degraded/warning/critical), robustness assessment, oscillation detection |
+$$V(m, t, c) = \text{relevance}(m, t) \times \text{freshness}(m) \times \text{utility}(m, c)$$
 
-### Work Chain
+| 分量 | 定义 | 实现 |
+|------|------|------|
+| relevance(m,t) | BM25 评分 + 领域 Jaccard 软混合 | `final_score = bm25 × 0.7 + domain_jaccard × 0.3` |
+| freshness(m) | exp(-age_days / 30) | 指数衰减，τ = 30 天 |
+| utility(m,c) | 1 + α·ln(1 + usage_count) | 使用次数的对数边际收益 |
 
-```
-User Input → Intent Parser → Task Object → Pipeline Plan → Execution → Result
-              (14 intent types)   (stable)     (DAG steps)    (tools)    (audit)
-```
+### PID 稳定性 —— Lyapunov 证明
 
-### DDD Domain Boundaries
+考虑上下文 PID 控制器：e(t) = usage(t) - 0.70（设定点）
 
-| Domain | Module | Role |
-|--------|--------|------|
-| Intent Parsing | `intent_parser.py` | Sensor — perceives user input, extracts feature signals |
-| Task Domain | `task_object.py` | Setpoint — defines target state and constraints |
-| Memory Domain | `memory.py` | Historical state storage — cross-session knowledge persistence |
-| Context Domain | `layered_context.py` | State observer — maintains current system state |
-| Capability Domain | `capability_registry.py` | Actuator collection — callable control methods |
-| Execution Domain | `agent_loop.py` | Controller — run_agent_turn closed-loop control |
-| Decision Audit | `decision_audit.py` | Logger — full-state traceability |
-| Feedback Control | `feedback_controller.py` | Regulator — negative correction + positive reinforcement |
-| Feedforward Control | `feedforward_controller.py` | Predictor — task prediction + risk prediction |
-| Stability Monitor | `stability_monitor.py` | Observer — health scoring + anomaly detection |
+构造 Lyapunov 函数：VL(e, ∫e) = ½e² + (ki/2)(∫e)²
 
-## What This Repository Provides
+则 V̇L = -(kp/m)·e² < 0（当 kp > 0），系统**渐近稳定**：e(t) → 0 as t → ∞。
 
-MiniCode Python is a terminal AI coding assistant implemented in Python, focused on:
+### 自适应冷却
 
-- **Terminal-first** coding workflows
-- **Tool calling** and agent loop execution
-- **TUI-based** interactive experience
-- **Session persistence** and recovery
-- **Permission-gated** local execution
-- **MCP integration**
-- **Cybernetics-driven** self-regulation
-- **DDD-based** modular architecture
-- **Pipeline orchestration** for complex tasks
-- **Decision audit** for full traceability
-- **Layered context** with token budget management
-- **Working memory** protection with priority-based eviction
+$$\tau_{\text{cool}}(c) = \tau_{\text{base}} \times (1 - \text{context\_pressure})$$
 
-## Key Features
+上下文压力高 → 冷却短 → 注入更积极。钳位在 [5s, 120s]。
 
-### Engineering Cybernetics Integration
-- **Negative feedback**: Auto-corrects when system stability drops (reduces concurrency, shortens timeouts, forces context compaction)
-- **Positive feedback**: Reinforces successful patterns (skill updates, memory persistence)
-- **PID adaptive tuning**: Gradual parameter optimization for smooth transitions
-- **Feedforward control**: Pre-emptively configures based on task intent, complexity, and entities
-- **Risk pre-assessment**: Identifies permission, resource, timeout, and complexity risks before execution
-- **Stability monitoring**: Real-time health scoring with 6-dimensional metrics (error rate, context usage, latency, CPU, memory, throughput)
+### 扩散激活
 
-### DDD Architecture
-- Clear bounded contexts with single responsibility
-- Entity/Value Object/Aggregate Root patterns
-- Repository pattern for memory and capability management
-- Domain events for decoupled cross-domain communication
+$$a_j = \sum_i a_i \times 0.5 \times \text{Jaccard}(m_i, m_j)$$
 
-### Work Chain Deepening
-- **Intent Parser**: 14 intent types, entity extraction (files/functions/classes/languages), complexity estimation
-- **Task Object**: Stable task representation with constraints, expected outputs, state machine
-- **Pipeline Engine**: DAG-based step planning with dependency resolution and retry logic
-- **Capability Registry**: Self-describing tools with domain/scope classification and dependency tracking
+通过 `related_to` 图传播，depth=1。实现 Hebb 式联想记忆。
 
-### Memory System — Cybernetic Retrieval Pipeline
+### 信息保持界
 
-**The core innovation: treating memory retrieval as a closed-loop control problem.**
+跨层级记忆压缩：I(m_arch) ≈ I(m) - ε，其中 ε = -log₂(len(original)/len(summarized))
 
-Traditional agent memory uses static retrieval (fixed top-K BM25 or vector similarity). Our system applies engineering cybernetics to dynamically optimize every stage of the memory lifecycle.
+---
 
-#### Theoretical Framework
-
-| Theory | Formalization | Implementation |
-|--------|--------------|----------------|
-| **Memory Value Function** | `V(m,t,c) = relevance(m,t) × freshness(m) × utility(m,c)` | `_memory_value()` in `memory_pipeline.py` |
-| **Lyapunov Stability** | `V̇_L = -(kp/m)·e² < 0` for PID control | `ContextPIDController` with anti-windup |
-| **Information Preservation** | `I(m_arch) ≈ I(m) - ε` across tiers | `MemoryTier` WORKING→SHORT_TERM→LONG_TERM→ARCHIVAL |
-| **Spreading Activation** | `a_j = Σ a_i × 0.5 × Jaccard(m_i, m_j)` | `_spread_activation()` via `related_to` graph |
-| **Adaptive Cooldown** | `τ_cool = τ_base × (1 - context_pressure)` | `inject()` with dynamic rate limiting |
-
-#### Retrieval Pipeline (3-layer)
+## 系统架构
 
 ```
-Task Description + Active Files
+                         ┌──────────────────────────────┐
+                         │   CyberneticOrchestrator     │
+                         │   (15+ controllers)          │
+                         └──────────┬───────────────────┘
+                                    │
+         ┌──────────────────────────┼──────────────────────────┐
+         │                          │                          │
+    ┌────▼─────┐            ┌──────▼──────┐           ┌───────▼──────┐
+    │  PID ×4  │            │  Kalman ×5  │           │  Feedforward │
+    │ context  │            │  state      │           │  predictive  │
+    │ cost     │            │  observer   │           │  decoupling  │
+    │ feedback │            │             │           │              │
+    │ adaptive │            │             │           │              │
+    └──────────┘            └─────────────┘           └──────────────┘
+                                    │
+                         ┌──────────▼───────────┐
+                         │   MemoryPipeline     │
+                         │   (unified facade)   │
+                         └──────────┬───────────┘
+                                    │
+              ┌─────────────────────┼─────────────────────┐
+              │                     │                     │
+    ┌─────────▼────────┐  ┌────────▼────────┐  ┌─────────▼────────┐
+    │   READ           │  │   WRITE         │  │   MAINTAIN       │
+    │ Domain→BM25      │  │ ReflectionEngine│  │ CuratorAgent     │
+    │ +Vector(RRF)     │  │ →TaskContext    │  │ consolidate      │
+    │ →Reranker→Inject │  │ →MemoryManager  │  │ validate/promote │
+    └──────────────────┘  └─────────────────┘  └──────────────────┘
+```
+
+### 记忆检索管线（3 层）
+
+```
+Task + Files
     │
     ▼
-Layer 1: Domain Classification → BM25 + Domain Weighted Search
-    │  (final_score = bm25 × 0.7 + domain_jaccard × 0.3)
-    │  + Query Reformulation Fallback (stopword stripping)
-    │  + Memory Value Scoring (V = rel × fresh × util)
+Layer 1 ─ 语义理解
+    DomainClassifier (9 领域, 60+ 文件后缀映射)
+    BM25 + Domain Weight (final = bm25×0.7 + jaccard×0.3)
+    Query Reformulation (低分时自动改写)
+    Vector Search + RRF Fusion (可选)
+    Memory Value Scoring (V = rel × fresh × util)
+    │
     ▼
-Layer 2: LLM Reranker (Haiku-level, cached)
-    │  (top-15 → curated top-3 + conflict detection + context summary)
+Layer 2 ─ 策展精选
+    LLM Reranker (Haiku-level, LRU cached, 60s TTL)
+    top-15 → curated top-3
+    矛盾检测 + 上下文摘要
+    │
     ▼
-Layer 3: Spreading Activation + Adaptive Injection
-    │  (related_to graph neighbors, context-pressure-aware cooldown)
+Layer 3 ─ 联想注入
+    Spreading Activation (related_to graph, depth=1)
+    Adaptive Cooldown (context-pressure aware)
+    PID-controlled injection rate
+    │
     ▼
-Injected into System Prompt
+System Prompt
 ```
 
-#### Multi-Tier Storage Architecture
+### 多层存储架构
 
-| Tier | Retention | Compression | Promotion Rule |
-|------|-----------|-------------|---------------|
-| WORKING | Current session | None | Auto on access |
-| SHORT_TERM | < 7 days | None | usage ≥ 5 AND age > 7d |
-| LONG_TERM | < 30 days | None | usage ≥ 5 AND age > 7d |
-| ARCHIVAL | Permanent | Summarized | age > 30d since access |
+| 层级 | 保留期 | 压缩 | 晋升规则 |
+|------|--------|------|---------|
+| WORKING | 当前会话 | 无 | 访问时自动 |
+| SHORT_TERM | < 7 天 | 无 | usage ≥ 5 ∧ age > 7d |
+| LONG_TERM | < 30 天 | 无 | — |
+| ARCHIVAL | 永久 | 首句摘要 | age > 30d 未访问 |
 
-#### Background Curation Agent
+---
 
-Runs every ~10 tasks during idle:
-- **Consolidate**: Merge 3+ related memories into synthetic insights
-- **Validate**: Cross-reference memory file paths against actual codebase
-- **Archive**: Jaccard > 0.9 near-duplicates → ARCHIVAL tier
-- **Link**: Auto-build `related_to` graph edges
-- **Promote**: Tier transitions based on usage and age
+## Memory Pipeline API
 
-#### Experimental Results
-
-**Ablation study**: 80 memories × 20 queries across 5 domains (frontend/backend/database/devops/testing)
-
-| Configuration | P@3 | R@5 | MRR | Noise |
-|-------------|-----|-----|-----|-------|
-| C0: BM25 (baseline) | 0.350 | 0.362 | 0.713 | 65.0% |
-| C1: + Domain Weight | 0.383 | 0.446 | 0.844 | 42.0% |
-| C2: + Query Expansion | 0.450 | 0.496 | 0.858 | 38.0% |
-| C3: + Reranker (Full) | **0.717** | **0.704** | **1.000** | **6.7%** |
-
-**Key findings**:
-- Full pipeline achieves **2.05× precision improvement** over raw BM25
-- **58.3% noise reduction** (65% → 6.7% cross-domain contamination)
-- Reranker alone contributes **+0.267 P@3** (73% of total improvement)
-- Domain classification + Query expansion provide **-27% noise at zero LLM cost**
-
-#### Memory Pipeline API (Unified Facade)
+**设计原则：一个类，四个方法，完整生命周期。**
 
 ```python
+from minicode.memory_pipeline import MemoryPipeline
+
 pipeline = MemoryPipeline(memory_manager)
-pipeline.initialize(model_adapter)
+pipeline.initialize(model_adapter, enable_vector=True)
 
-# On task start
+# 任务开始 —— 检索 + 注入
 memories = pipeline.read("Add login form", ["src/Login.tsx"])
-messages = pipeline.inject("Add login form", ["src/Login.tsx"], messages)
+messages  = pipeline.inject("Add login form", ["src/Login.tsx"], messages)
 
-# On task end
+# 任务结束 —— 持久化 + 反馈
 pipeline.write("Add login form", execution_trace)
+pipeline.feedback(success=True, injected_memory_ids=[...])
 
-# Background (every ~10 tasks)
+# 后台维护 —— 每 ~10 个任务
 report = pipeline.maintain()
 ```
 
-**Design principle**: ONE class, FOUR methods, complete memory lifecycle. DomainClassifier, Reranker, Injector, Curator are internal implementation details — never exposed to callers.
+### 消融实验 —— 逐组件贡献
 
-## Project Positioning
+```
+Config                      P@3      R@5      MRR      Noise
+────────────────────────────────────────────────────────────
+C0: BM25 (baseline)        0.350    0.362    0.713    65.0%
+C1: + Domain Weight        0.383    0.446    0.844    42.0%
+C2: + Query Expansion      0.450    0.496    0.858    38.0%
+C3: + Reranker (Full)      0.717    0.704    1.000     6.7%
+```
 
-This repository is the Python version of MiniCode, maintained as a language-specific subproject in the broader MiniCode ecosystem.
+**结论**：Reranker 贡献 73% 的精度提升（+0.267 P@3）。Domain + Expansion 在零 LLM 成本下削减 27% 噪音。完整管线精度 2.05× 基准。
 
-If you came here from the main MiniCode repository, the important thing to know is:
+---
 
-- the main repository syncs a submodule commit
-- it does not automatically mirror the full live state of this repository
-- so the submodule pointer in the main repo may lag behind the latest changes here
+## 控制论控制器矩阵
 
-In other words, what gets synced upstream is a specific commit, not the whole repository state. If the main repo has not updated its submodule pointer yet, the content shown there can be older than what you see here.
+| 控制器 | 类型 | 作用 |
+|--------|------|------|
+| ContextPIDController | PID | 上下文压力 → 压缩强度 |
+| CostControlLoop (BudgetPID) | PID | 成本速率 → 预算乘数 |
+| FeedbackController (双 PID) | PID ×2 | 系统状态 → 13 维 ControlSignal |
+| AdaptivePIDTuner | 自适应 | 每 20 轮自动调参 |
+| StateObserver | Kalman ×5 | 隐藏状态估计（负载/错误/压力/掌握度/退化） |
+| FeedforwardController | 前馈 | Intent → 预配置 |
+| PredictiveController | 预测 | 时序预测 → 主动动作 |
+| DecouplingController | 解耦 | 多变量 RGA 耦合分析 |
+| SelfHealingEngine | 自愈 | 8 种故障类型的自动恢复 |
+| StabilityMonitor | 监测 | 6 维健康评分 + 异常检测 |
+| CyberneticSupervisor | 监督 | 全局风险聚合 |
+| ProgressController | 进度 | 停滞检测 + 策略建议 |
+| MemoryInjectionController | 记忆 | PID 控制注入模式 |
+| ModelSelectionController | 模型 | 风险/成本自适应选模 |
+| DomainClassifier | 分类 | 9 领域 60+ 后缀自动推导 |
 
-For the exact maintainer workflow, see [docs/SUBMODULE_SYNC.md](docs/SUBMODULE_SYNC.md).
+---
 
-## Related Repositories
+## 目录结构
 
-| Repository | Role |
-| --- | --- |
-| [MiniCode](https://github.com/LiuMengxuan04/MiniCode) | Main project entry and ecosystem hub |
-| [MiniCode-Python](https://github.com/QUSETIONS/MiniCode-Python) | Python implementation |
-| [MiniCode-rs](https://github.com/harkerhand/MiniCode-rs) | Rust implementation |
+```
+minicode/
+├── memory.py                # 核心：BM25, MemoryTier, MemoryEntry, 索引
+├── memory_pipeline.py       # 统一管线：read/write/inject/maintain
+├── memory_reranker.py       # LLM 策展：top-15 → top-3 + 摘要
+├── memory_curator_agent.py  # 后台策展：合并/校验/晋升/关联
+├── memory_injector.py       # PID 控制的记忆注入
+├── domain_classifier.py     # 领域分类：60+ 后缀映射
+├── vector_memory.py         # 向量检索（可选）
+├── agent_reflection.py      # 自省引擎 → TaskContext
+├── cybernetic_orchestrator.py # 15+ 控制器外观
+├── feedback_controller.py   # 双 PID 外环 + ControlSignal
+├── context_cybernetics.py   # 7 层上下文控制论
+├── cost_control.py          # 预算 PID
+├── self_healing_engine.py   # 8 种故障自愈
+├── agent_loop.py            # Agent 主循环
+└── ...
 
-## Current Status
+tests/
+├── test_domain_memory.py    # 领域分类 + 查询扩展
+├── test_memory_reranker.py  # Reranker 全场景
+├── test_memory_curator.py   # Curator 全场景
+├── test_feedback_controller.py
+├── test_feedforward_controller.py
+├── test_cybernetics_concurrency.py  # 并发压测
+├── test_cybernetics_e2e.py          # E2E 控制链
+└── ...
 
-This repository is an actively developed Python implementation, not just a mirror of the main repository.
+docs/
+└── memory_theory.md         # 形式化理论：V(m,t,c) + Lyapunov + 信息保持
 
-It includes ongoing work in areas such as:
+py-src/scripts/
+├── ablation_study.py        # 消融实验（LaTeX 表格输出）
+├── benchmark_memory.py      # 全量 benchmark
+└── demo_memory_reranker.py  # 效果对比 demo
+```
 
-- Python-side feature parity with the main MiniCode experience
-- TUI architecture cleanup
-- Transcript and rendering performance improvements
-- MCP and tool execution improvements
-- Session, context, and memory handling
-- **Engineering Cybernetics (15+ controllers)**: Dual-PID loops ×2, Kalman filters ×5, feedback/feedforward/predictive/decoupling control
-- **Closed-loop memory retrieval**: Domain-weighted BM25 + LLM reranker + spreading activation + adaptive injection
-- **Multi-tier storage**: WORKING → SHORT_TERM → LONG_TERM → ARCHIVAL with automatic tier promotion
-- **Background curator agent**: Auto-consolidation, stale detection, insight synthesis, graph linking
-- **DDD architecture** with bounded contexts
-- **Work chain**: Intent → Task → Pipeline → Execution → Audit
-- **Performance**: BM25 indexing, LRU cache, precomputed IDF/avgdl, batch save
-- **Security**: SSRF protection, atomic writes, timeout control
+---
 
-## Test Coverage
-
-**718 tests passed, 2 skipped** across 30+ test files
-
-## Quick Start
+## 快速开始
 
 ```bash
 git clone https://github.com/QUSETIONS/MiniCode-Python.git
 cd MiniCode-Python
-python -m minicode.main --install
-```
 
-Run directly:
+# 安装
+pip install -e .
 
-```bash
+# 运行
 python -m minicode.main
+
+# 测试
+pytest  # 718 passed, 2 skipped
+
+# Mock 模式（无需 API key）
+MINI_CODE_MODEL_MODE=mock python -m minicode.main
 ```
 
-## Tests
+## 配置
 
-### Cybernetics Integration Tests
-
-Verify the Engineering Cybernetics controllers:
-
-```bash
-python tests/test_cybernetics_integration.py
-```
-
-All 7 tests verify the closed-loop architecture:
-1. **Negative Feedback** — auto-corrects instability (concurrency reduction, timeout adjustment)
-2. **Positive Feedback** — reinforces successful patterns (skill update, memory persistence)
-3. **PID Adaptive Tuning** — gradual parameter optimization
-4. **Feedforward Pre-configuration** — intent-based preemptive setup
-5. **Risk Pre-assessment** — identifies permission/resource/complexity risks
-6. **Stability Monitoring** — multi-dimensional health scoring
-7. **Full Integration** — feedforward → execution → monitoring → feedback closed loop
-
-### Unit Tests
-
-```bash
-pytest
-```
-
-## Configuration
-
-Configure your model in `~/.mini-code/settings.json`:
-
+`~/.mini-code/settings.json`:
 ```json
 {
   "model": "claude-sonnet-4-20250514",
   "env": {
-    "ANTHROPIC_BASE_URL": "https://api.anthropic.com",
-    "ANTHROPIC_AUTH_TOKEN": "your-token-here"
+    "ANTHROPIC_AUTH_TOKEN": "your-token"
   }
 }
 ```
 
-## Development
+---
 
-Install dev dependencies and run tests:
+## MiniCode 生态
 
-```bash
-pip install -e ".[dev]"
-pytest
-```
+| 仓库 | 角色 |
+|------|------|
+| [MiniCode](https://github.com/LiuMengxuan04/MiniCode) | 主项目入口 |
+| [MiniCode-Python](https://github.com/QUSETIONS/MiniCode-Python) | Python 实现（本仓库） |
+| [MiniCode-rs](https://github.com/harkerhand/MiniCode-rs) | Rust 实现 |
 
-Mock mode:
+---
 
-```bash
-MINI_CODE_MODEL_MODE=mock python -m minicode.main
-```
+## 致谢
 
-## Sync Note For Main Repository Maintainers
-
-If this repository is consumed as a submodule from the main MiniCode repository:
-
-1. update the submodule pointer in the main repository
-2. commit that submodule pointer update upstream
-3. do not assume new commits here are automatically reflected there
-
-This distinction matters for README visibility, feature status, and release communication.
-
-## Acknowledgments
-
-- MiniCode main project: [LiuMengxuan04/MiniCode](https://github.com/LiuMengxuan04/MiniCode)
-- Rust implementation: [harkerhand/MiniCode-rs](https://github.com/harkerhand/MiniCode-rs)
-- Engineering Cybernetics: 钱学森《工程控制论》(Engineering Cybernetics, 1954)
+- 钱学森《工程控制论》(Engineering Cybernetics, 1954)
+- Wiener, N. *Cybernetics: or Control and Communication in the Animal and the Machine* (1948)
+- Mem0 / Letta (MemGPT) / True Memory 等记忆系统的开创性工作
+- SCL (Structured Cognitive Loop) R-CCAM 架构

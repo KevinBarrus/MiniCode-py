@@ -101,12 +101,95 @@ MiniCode Python is a terminal AI coding assistant implemented in Python, focused
 - **Pipeline Engine**: DAG-based step planning with dependency resolution and retry logic
 - **Capability Registry**: Self-describing tools with domain/scope classification and dependency tracking
 
-### Memory System
-- **3-layer physical storage**: USER (cross-project) → PROJECT (shared) → LOCAL (project-specific)
-- **BM25 search** with CJK support and 80+ programming term expansions
-- **Working memory protection** with importance-based eviction
-- **Batch save** with dirty tracking and 5s interval flush
-- **Index structures** for O(1) lookup (ID, tag, category)
+### Memory System — Cybernetic Retrieval Pipeline
+
+**The core innovation: treating memory retrieval as a closed-loop control problem.**
+
+Traditional agent memory uses static retrieval (fixed top-K BM25 or vector similarity). Our system applies engineering cybernetics to dynamically optimize every stage of the memory lifecycle.
+
+#### Theoretical Framework
+
+| Theory | Formalization | Implementation |
+|--------|--------------|----------------|
+| **Memory Value Function** | `V(m,t,c) = relevance(m,t) × freshness(m) × utility(m,c)` | `_memory_value()` in `memory_pipeline.py` |
+| **Lyapunov Stability** | `V̇_L = -(kp/m)·e² < 0` for PID control | `ContextPIDController` with anti-windup |
+| **Information Preservation** | `I(m_arch) ≈ I(m) - ε` across tiers | `MemoryTier` WORKING→SHORT_TERM→LONG_TERM→ARCHIVAL |
+| **Spreading Activation** | `a_j = Σ a_i × 0.5 × Jaccard(m_i, m_j)` | `_spread_activation()` via `related_to` graph |
+| **Adaptive Cooldown** | `τ_cool = τ_base × (1 - context_pressure)` | `inject()` with dynamic rate limiting |
+
+#### Retrieval Pipeline (3-layer)
+
+```
+Task Description + Active Files
+    │
+    ▼
+Layer 1: Domain Classification → BM25 + Domain Weighted Search
+    │  (final_score = bm25 × 0.7 + domain_jaccard × 0.3)
+    │  + Query Reformulation Fallback (stopword stripping)
+    │  + Memory Value Scoring (V = rel × fresh × util)
+    ▼
+Layer 2: LLM Reranker (Haiku-level, cached)
+    │  (top-15 → curated top-3 + conflict detection + context summary)
+    ▼
+Layer 3: Spreading Activation + Adaptive Injection
+    │  (related_to graph neighbors, context-pressure-aware cooldown)
+    ▼
+Injected into System Prompt
+```
+
+#### Multi-Tier Storage Architecture
+
+| Tier | Retention | Compression | Promotion Rule |
+|------|-----------|-------------|---------------|
+| WORKING | Current session | None | Auto on access |
+| SHORT_TERM | < 7 days | None | usage ≥ 5 AND age > 7d |
+| LONG_TERM | < 30 days | None | usage ≥ 5 AND age > 7d |
+| ARCHIVAL | Permanent | Summarized | age > 30d since access |
+
+#### Background Curation Agent
+
+Runs every ~10 tasks during idle:
+- **Consolidate**: Merge 3+ related memories into synthetic insights
+- **Validate**: Cross-reference memory file paths against actual codebase
+- **Archive**: Jaccard > 0.9 near-duplicates → ARCHIVAL tier
+- **Link**: Auto-build `related_to` graph edges
+- **Promote**: Tier transitions based on usage and age
+
+#### Experimental Results
+
+**Ablation study**: 80 memories × 20 queries across 5 domains (frontend/backend/database/devops/testing)
+
+| Configuration | P@3 | R@5 | MRR | Noise |
+|-------------|-----|-----|-----|-------|
+| C0: BM25 (baseline) | 0.350 | 0.362 | 0.713 | 65.0% |
+| C1: + Domain Weight | 0.383 | 0.446 | 0.844 | 42.0% |
+| C2: + Query Expansion | 0.450 | 0.496 | 0.858 | 38.0% |
+| C3: + Reranker (Full) | **0.717** | **0.704** | **1.000** | **6.7%** |
+
+**Key findings**:
+- Full pipeline achieves **2.05× precision improvement** over raw BM25
+- **58.3% noise reduction** (65% → 6.7% cross-domain contamination)
+- Reranker alone contributes **+0.267 P@3** (73% of total improvement)
+- Domain classification + Query expansion provide **-27% noise at zero LLM cost**
+
+#### Memory Pipeline API (Unified Facade)
+
+```python
+pipeline = MemoryPipeline(memory_manager)
+pipeline.initialize(model_adapter)
+
+# On task start
+memories = pipeline.read("Add login form", ["src/Login.tsx"])
+messages = pipeline.inject("Add login form", ["src/Login.tsx"], messages)
+
+# On task end
+pipeline.write("Add login form", execution_trace)
+
+# Background (every ~10 tasks)
+report = pipeline.maintain()
+```
+
+**Design principle**: ONE class, FOUR methods, complete memory lifecycle. DomainClassifier, Reranker, Injector, Curator are internal implementation details — never exposed to callers.
 
 ## Project Positioning
 
@@ -141,11 +224,18 @@ It includes ongoing work in areas such as:
 - Transcript and rendering performance improvements
 - MCP and tool execution improvements
 - Session, context, and memory handling
-- **Engineering Cybernetics integration** (feedback/feedforward/stability)
-- **DDD architecture** (domain-driven design with bounded contexts)
-- **Work chain deepening** (Intent → Task → Pipeline → Execution → Audit)
-- **Performance optimization** (BM25 indexing, batch save, lazy cache invalidation)
-- **Security hardening** (SSRF protection, atomic writes, timeout control)
+- **Engineering Cybernetics (15+ controllers)**: Dual-PID loops ×2, Kalman filters ×5, feedback/feedforward/predictive/decoupling control
+- **Closed-loop memory retrieval**: Domain-weighted BM25 + LLM reranker + spreading activation + adaptive injection
+- **Multi-tier storage**: WORKING → SHORT_TERM → LONG_TERM → ARCHIVAL with automatic tier promotion
+- **Background curator agent**: Auto-consolidation, stale detection, insight synthesis, graph linking
+- **DDD architecture** with bounded contexts
+- **Work chain**: Intent → Task → Pipeline → Execution → Audit
+- **Performance**: BM25 indexing, LRU cache, precomputed IDF/avgdl, batch save
+- **Security**: SSRF protection, atomic writes, timeout control
+
+## Test Coverage
+
+**718 tests passed, 2 skipped** across 30+ test files
 
 ## Quick Start
 

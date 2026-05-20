@@ -56,6 +56,7 @@ class MemoryPipeline:
         self._curator: Any = None
         self._reflection: Any = None
         self._vector_store: Any = None
+        self._dense_store: Any = None
         self._domain_classifier_loaded = False
 
         self._initialized = False

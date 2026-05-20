@@ -9,6 +9,8 @@ from .chrome import (
     DIM,
     ICON_DIVIDER,
     ICON_DOT,
+    _looks_like_diff_block,
+    colorize_unified_diff_block,
 )
 from .markdown import render_markdownish
 from .theme import theme
@@ -18,6 +20,9 @@ from .types import TranscriptEntry
 _SEPARATOR = f"  {DIM}{ICON_DOT} {ICON_DIVIDER * 3} {ICON_DOT}{RESET}"
 _SEPARATOR_LINES = ["", _SEPARATOR, ""]
 _SEPARATOR_LINE_COUNT = 3
+
+# Tool names that produce diff output
+_DIFF_TOOLS = frozenset({"edit_file", "patch_file", "diff_viewer"})
 
 # Tool output preview limits (match Rust TOOL_PREVIEW_LINES / TOOL_PREVIEW_CHARS)
 _TOOL_PREVIEW_LINES = 6
@@ -103,32 +108,38 @@ def _render_transcript_entry(entry: TranscriptEntry) -> str:
         if entry.status == "running":
             body = entry.body
         elif is_collapsing:
-            if collapsible_by_lines:
-                preview = "\n".join(body_lines[:_TOOL_PREVIEW_LINES])
-                hidden = max(0, total_lines - _TOOL_PREVIEW_LINES)
-                body = (
-                    preview_tool_body(entry.toolName or "", render_markdownish(preview))
-                    + (f"\n{t.subtle}  ... {hidden} more lines{t.reset}" if hidden > 0 else "")
-                )
-            else:
-                body = preview_tool_body(entry.toolName or "", render_markdownish(entry.body))
+            body = _render_tool_body(entry, body_lines, total_lines, collapsible_by_lines, is_collapsed)
         elif is_collapsed:
             summary = entry.collapsedSummary or "output collapsed"
             body = f"{t.subtle}{t.italic}{summary}{t.reset}"
         else:
-            if collapsible_by_lines:
-                preview = "\n".join(body_lines[:_TOOL_PREVIEW_LINES])
-                hidden = total_lines - _TOOL_PREVIEW_LINES
-                body = (
-                    preview_tool_body(entry.toolName or "", render_markdownish(preview))
-                    + f"\n{t.subtle}  ... {hidden} more lines{t.reset}"
-                )
-            else:
-                body = preview_tool_body(entry.toolName or "", render_markdownish(entry.body))
+            body = _render_tool_body(entry, body_lines, total_lines, collapsible_by_lines, is_collapsed)
 
         return f"{label}\n{_indent_block(body)}"
 
     return ""
+
+
+def _render_tool_body(entry, body_lines, total_lines, collapsible, is_collapsed):
+    """Render tool body with diff coloring for edit/patch/diff tools."""
+    t = theme()
+    body = entry.body
+
+    if entry.toolName in _DIFF_TOOLS and _looks_like_diff_block(body):
+        colored = colorize_unified_diff_block(body)
+        if collapsible and not is_collapsed:
+            preview = "\n".join(colored.split("\n")[:_TOOL_PREVIEW_LINES])
+            hidden = max(0, total_lines - _TOOL_PREVIEW_LINES)
+            return preview + (f"\n{t.subtle}  ... {hidden} more lines{t.reset}" if hidden > 0 else "")
+        return colored
+
+    if collapsible and not is_collapsed:
+        preview = "\n".join(body_lines[:_TOOL_PREVIEW_LINES])
+        hidden = max(0, total_lines - _TOOL_PREVIEW_LINES)
+        return preview_tool_body(entry.toolName or "", render_markdownish(preview)) + (
+            f"\n{t.subtle}  ... {hidden} more lines{t.reset}" if hidden > 0 else ""
+        )
+    return preview_tool_body(entry.toolName or "", render_markdownish(body))
 
 
 def get_transcript_window_size(window_size: int | None = None) -> int:

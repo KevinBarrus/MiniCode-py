@@ -17,6 +17,8 @@ ERASE_SCREEN_AND_HOME = "\u001b[2J\u001b[H"
 ENABLE_MOUSE_TRACKING = "\u001b[?1000h\u001b[?1003h\u001b[?1006h"
 DISABLE_MOUSE_TRACKING = "\u001b[?1006l\u001b[?1003l\u001b[?1000l"
 
+ENABLE_BRACKETED_PASTE  = "[?2004h"
+DISABLE_BRACKETED_PASTE = "[?2004l"
 # Terminal types that do not support alternate screen or mouse tracking.
 _DUMB_TERMS = frozenset({"dumb", "linux", ""})
 
@@ -106,14 +108,14 @@ def enter_alternate_screen() -> None:
         # Dumb terminals (e.g. 'linux' console, 'dumb', piped output)
         # don't support alternate screen or mouse tracking.
         return
-    sys.stdout.write(DISABLE_MOUSE_TRACKING + ENTER_ALT_SCREEN + ERASE_SCREEN_AND_HOME + ENABLE_MOUSE_TRACKING)
+    sys.stdout.write(DISABLE_MOUSE_TRACKING + ENTER_ALT_SCREEN + ERASE_SCREEN_AND_HOME + ENABLE_MOUSE_TRACKING + ENABLE_BRACKETED_PASTE)
     sys.stdout.flush()
 
 
 def exit_alternate_screen() -> None:
     if _is_dumb_terminal():
         return
-    sys.stdout.write(DISABLE_MOUSE_TRACKING + EXIT_ALT_SCREEN)
+    sys.stdout.write(DISABLE_MOUSE_TRACKING + EXIT_ALT_SCREEN + DISABLE_BRACKETED_PASTE)
     sys.stdout.flush()
 
 

@@ -319,9 +319,35 @@ def _handle_normal_mode_navigation(
         rerender()
         return True
 
+    if event.name == "left" and event.ctrl:
+        state.cursor_offset = _word_left(state.input, state.cursor_offset)
+        rerender()
+        return True
+
+    if event.name == "right" and event.ctrl:
+        state.cursor_offset = _word_right(state.input, state.cursor_offset)
+        rerender()
+        return True
+
     if event.name == "escape":
         state.input = ""
         state.cursor_offset = 0
+        state.selected_slash_index = 0
+        rerender()
+        return True
+
+    # Ctrl+W: delete word backward
+    if event.name == "w" and event.ctrl:
+        target = _word_left(state.input, state.cursor_offset)
+        state.input = state.input[:target] + state.input[state.cursor_offset:]
+        state.cursor_offset = target
+        state.selected_slash_index = 0
+        rerender()
+        return True
+
+    # Ctrl+K: delete to end of line
+    if event.name == "k" and event.ctrl:
+        state.input = state.input[:state.cursor_offset]
         state.selected_slash_index = 0
         rerender()
         return True
@@ -456,4 +482,30 @@ def _handle_feedback_mode_event(
 
     if isinstance(event, TextEvent) and not event.ctrl:
         pending.feedback_input += event.text
-        rerender()
+
+
+# ── Word navigation helpers ────────────────────────────────────────
+
+def _word_left(text: str, cursor: int) -> int:
+    """Move cursor left to previous word boundary."""
+    if cursor <= 1:
+        return 0
+    i = cursor - 1
+    while i > 0 and text[i].isspace():
+        i -= 1
+    while i > 0 and not text[i - 1].isspace():
+        i -= 1
+    return i
+
+
+def _word_right(text: str, cursor: int) -> int:
+    """Move cursor right to next word boundary."""
+    n = len(text)
+    if cursor >= n:
+        return n
+    i = cursor
+    while i < n and not text[i].isspace():
+        i += 1
+    while i < n and text[i].isspace():
+        i += 1
+    return i

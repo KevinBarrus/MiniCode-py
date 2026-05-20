@@ -229,6 +229,17 @@ def _handle_normal_mode_key(
         rerender()
         return True
 
+    # Ctrl+Home/Ctrl+End: jump to transcript top/bottom
+    if event.name == "home" and event.ctrl:
+        from minicode.tui.navigation import _get_max_transcript_scroll_offset
+        state.transcript_scroll_offset = _get_max_transcript_scroll_offset(args, state)
+        rerender()
+        return True
+    if event.name == "end" and event.ctrl:
+        state.transcript_scroll_offset = 0
+        rerender()
+        return True
+
     if event.name == "up":
         _handle_up_arrow(args, state, visible_commands, rerender)
         return True

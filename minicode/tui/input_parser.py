@@ -189,7 +189,7 @@ def parse_input_chunk(chunk: str) -> ParseResult:
             i += consumed
             continue
 
-        # CR, LF, CR+LF -> return
+        # CR, CR+LF -> return.  Lone LF -> insert newline (Ctrl+J)
         if char == '\r':
             if i + 1 < len(chunk) and chunk[i+1] == '\n':
                 i += 2
@@ -199,7 +199,7 @@ def parse_input_chunk(chunk: str) -> ParseResult:
             continue
 
         if char == '\n':
-            events.append(KeyEvent(name='return', ctrl=False, meta=False))
+            events.append(TextEvent(text='\n', ctrl=False))
             i += 1
             continue
 

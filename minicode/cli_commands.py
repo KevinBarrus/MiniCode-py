@@ -120,12 +120,27 @@ def format_slash_commands() -> str:
 
 
 def find_matching_slash_commands(user_input: str) -> list[str]:
-    return [command.usage for command in SLASH_COMMANDS if command.usage.startswith(user_input)]
+    """Find slash commands matching user input.
+
+    Tries exact prefix first, falls back to fuzzy subsequence matching.
+    """
+    commands = [c.usage for c in SLASH_COMMANDS]
+    prefix_matches = [c for c in commands if c.startswith(user_input)]
+    if prefix_matches:
+        return prefix_matches
+    # Fuzzy fallback: subsequence match (e.g., "mem" matches "/memory")
+    lower = user_input.lower()
+    fuzzy = [c for c in commands if all(ch in c.lower() for ch in lower)]
+    return fuzzy if fuzzy else commands
 
 
 def complete_slash_command(line: str) -> tuple[list[str], str]:
-    hits = [command.usage for command in SLASH_COMMANDS if command.usage.startswith(line)]
-    return (hits if hits else [command.usage for command in SLASH_COMMANDS], line)
+    commands = [c.usage for c in SLASH_COMMANDS]
+    hits = [c for c in commands if c.startswith(line)]
+    if not hits and line:
+        lower = line.lower()
+        hits = [c for c in commands if all(ch in c.lower() for ch in lower)]
+    return (hits if hits else commands, line)
 
 
 def try_handle_local_command(user_input: str, tools=None, cwd: str | None = None) -> str | None:

@@ -101,21 +101,24 @@ class MemoryPipeline:
         from minicode.agent_reflection import ReflectionEngine
         self._reflection = ReflectionEngine(memory_manager=self._memory)
 
-        # Vector store (optional)
+        # Vector store — sparse TF-IDF always available, optional sentence-transformers
         if enable_vector:
             try:
-                from minicode.vector_memory import VectorMemoryStore
-                self._vector_store = VectorMemoryStore()
-                if self._vector_store.enabled and self._memory:
-                    # Index existing memories
+                from minicode.vector_memory import SparseVectorStore, VectorMemoryStore
+                self._vector_store = SparseVectorStore()  # Zero-dependency, always works
+                # Also try the optional dense backend
+                self._dense_store = VectorMemoryStore()
+                if self._memory:
                     all_entries = []
                     from minicode.memory import MemoryScope
                     for scope in MemoryScope:
                         if scope in self._memory.memories:
                             all_entries.extend(self._memory.memories[scope].entries)
                     if all_entries:
-                        indexed = self._vector_store.index_entries(all_entries)
-                        logger.info("VectorMemoryStore: indexed %d existing entries", indexed)
+                        n = self._vector_store.index_entries(all_entries)
+                        logger.info("SparseVectorStore: indexed %d entries", n)
+                        if self._dense_store.enabled:
+                            self._dense_store.index_entries(all_entries)
             except Exception:
                 pass
 

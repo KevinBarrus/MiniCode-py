@@ -18,7 +18,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-from minicode.types import ChatMessage
+from minicode.agent_types import ChatMessage
 
 
 @dataclass

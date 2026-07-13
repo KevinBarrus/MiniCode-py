@@ -28,7 +28,7 @@ from minicode.tui.input_parser import (
     parse_input_chunk,
 )
 from minicode.tui.types import TranscriptEntry
-from minicode.types import ChatMessage, ModelAdapter
+from minicode.agent_types import ChatMessage, ModelAdapter
 
 # ---------------------------------------------------------------------------
 from minicode.tui.state import ScreenState

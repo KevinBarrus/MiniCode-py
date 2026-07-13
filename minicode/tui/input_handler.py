@@ -331,6 +331,8 @@ def _handle_input(
 
     # Local commands
     local_result = try_handle_local_command(input_text, tools=args.tools, cwd=args.cwd)
+    # 新增调试语句
+    logger.warning("LOCAL_CMD: input=%r result=%s", input_text, "HIT" if local_result else None)
     if local_result is not None:
         _push_transcript_entry(state, kind="assistant", body=local_result)
         return False

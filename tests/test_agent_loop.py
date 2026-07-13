@@ -1,7 +1,7 @@
 from minicode.agent_loop import run_agent_turn
 from minicode.state import create_app_store
 from minicode.tooling import ToolDefinition, ToolRegistry, ToolResult
-from minicode.types import AgentStep, ChatMessage, ModelAdapter, StepDiagnostics
+from minicode.agent_types import AgentStep, ChatMessage, ModelAdapter, StepDiagnostics
 
 
 class ScriptedModel(ModelAdapter):

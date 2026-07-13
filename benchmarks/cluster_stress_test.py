@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from minicode.agent_loop import run_agent_turn
 from minicode.agent_metrics import AgentMetricsCollector
 from minicode.tooling import ToolDefinition, ToolRegistry, ToolResult
-from minicode.types import AgentStep, ChatMessage, ModelAdapter
+from minicode.agent_types import AgentStep, ChatMessage, ModelAdapter
 
 
 class StressModel(ModelAdapter):

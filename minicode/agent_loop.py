@@ -10,7 +10,7 @@ from minicode.logging_config import get_logger
 from minicode.permissions import PermissionManager
 from minicode.state import Store, AppState, increment_tool_calls, set_busy, set_idle
 from minicode.tooling import ToolContext, ToolRegistry, ToolResult
-from minicode.types import AgentStep, ChatMessage, ModelAdapter
+from minicode.agent_types import AgentStep, ChatMessage, ModelAdapter
 
 # Hooks integration
 from minicode.hooks import HookEvent, fire_hook_sync
@@ -63,7 +63,6 @@ from minicode.memory import MemoryManager
 
 logger = get_logger("agent_loop")
 
-# 甯搁噺锛氶伩鍏嶉噸澶嶇殑鎻愮ず鏂囨湰
 NUDGE_CONTINUE = (
     "Continue immediately from your <progress> update with concrete tool calls, "
     "code changes, or an explicit <final> answer only if the task is complete. "
@@ -523,11 +522,11 @@ def run_agent_turn(
     enable_work_chain: bool = True,
 ) -> list[ChatMessage]:
     current_messages = list(messages)
-    saw_tool_result = False
-    empty_response_retry_count = 0
-    recoverable_thinking_retry_count = 0
-    tool_error_count = 0
-    step = 0
+    saw_tool_result = False # 本轮是否收到过工具结果
+    empty_response_retry_count = 0 # 空响应重试次数
+    recoverable_thinking_retry_count = 0 # thinking 中断重试
+    tool_error_count = 0 # 工具执行错误累计
+    step = 0 # 当前步数
 
     tool_scheduler = ToolScheduler(metrics_collector=metrics_collector)
 
@@ -559,6 +558,7 @@ def run_agent_turn(
     memory_injector: Any = None
 
     if enable_work_chain:
+        # 解析用户意图
         task, task_metadata = _build_work_chain_task(current_messages)
         layered_context, context_builder = _build_layered_context(
             current_messages, system_prompt, project_context, task,
@@ -587,6 +587,7 @@ def run_agent_turn(
             try:
                 current_model_id = model.model_id if hasattr(model, 'model_id') else ""
                 task_text = task.raw_input if hasattr(task, 'raw_input') else str(current_messages[-1].get('content', ''))
+                # 智能路由选择用哪个模型
                 routing, switch_result = smart_router.route_and_switch(
                     task_text,
                     current_model=current_model_id,
@@ -609,6 +610,7 @@ def run_agent_turn(
         # 初始化前馈控制器（预判式优化）
         if task:
             feedforward_controller = FeedforwardController()
+            # 前馈控制预判风险
             preemptive_config = feedforward_controller.preconfigure(task.parsed_intent, task.raw_input)
             risk_assessment = feedforward_controller.assess_risks(task.parsed_intent, preemptive_config)
             logger.info(
@@ -712,6 +714,7 @@ def run_agent_turn(
             if orch and task:
                 try:
                     task_desc = task.raw_input if hasattr(task, 'raw_input') else ""
+                    # 记忆注入
                     current_messages = orch.inject_memories(task_desc, current_messages)
                 except Exception:
                     pass
@@ -808,6 +811,7 @@ def run_agent_turn(
                         adj.budget_multiplier, adj.reason,
                     )
 
+            # 检查上下文，如果超过阈值就进行压缩，避免进入循环后第一轮就爆
             cyber_messages, cyber_result, cyber_action = context_cybernetics.run_cycle(
                 current_messages,
                 error_rate=float(tool_error_count) / max(step, 1) if step > 0 else 0.0,
@@ -851,6 +855,7 @@ def run_agent_turn(
 
             # 高级控制论闭环（每个 step 开始时执行）
             if enable_work_chain and orch:
+                # 观测
                 orch.step_start(
                     context_manager=context_manager,
                     step=step,
@@ -941,6 +946,7 @@ def run_agent_turn(
 
             next_step: AgentStep
             try:
+                # 调 LLM
                 next_step = _model_next(
                     model,
                     current_messages,
@@ -1053,6 +1059,7 @@ def run_agent_turn(
                     stop_reason=diagnostics.stopReason if diagnostics else None,
                     ignored_block_types=diagnostics.ignoredBlockTypes if diagnostics else None,
                 ) and recoverable_thinking_retry_count < 3:
+                    # thinking 因 max_tokens 中断 → 追加 RESUME_AFTER_MAX_TOKENS，重试
                     recoverable_thinking_retry_count += 1
                     stop_reason = diagnostics.stopReason if diagnostics else None
                     progress_content = (
@@ -1076,6 +1083,7 @@ def run_agent_turn(
                     continue
 
                 if is_empty and empty_response_retry_count < 2:
+                    # 空响应 → 追加 NUDGE_AFTER_EMPTY_RESPONSE，重试
                     empty_response_retry_count += 1
                     current_messages.append(
                         {
@@ -1119,6 +1127,7 @@ def run_agent_turn(
                 )
                 return current_messages
 
+            #  progress 消息 → 追加 NUDGE_CONTINUE，继续循环（不占 step）
             if next_step.content:
                 role = "assistant_progress" if next_step.contentKind == "progress" else "assistant"
                 if role == "assistant_progress":
@@ -1161,6 +1170,7 @@ def run_agent_turn(
                 _results.append((call, result))
             else:
                 # Multiple calls — use ToolScheduler for intelligent partitioning
+                # 工具调度：读写分离
                 concurrent_calls, serial_calls = tool_scheduler.schedule_calls(calls, tools)
 
                 _results.clear()  # Reuse outer declaration
@@ -1185,6 +1195,7 @@ def run_agent_turn(
                             tool_scheduler.last_decision.cooldown_seconds,
                             ", ".join(tool_scheduler.last_decision.reasons or []),
                         )
+                    # 并发执行读操作
                     with concurrent.futures.ThreadPoolExecutor(
                         max_workers=max_workers,
                         thread_name_prefix="mc-tool",
@@ -1210,6 +1221,7 @@ def run_agent_turn(
                     for call in serial_calls:
                         if metrics_collector:
                             metrics_collector.start_tool(call["toolName"])
+                        # 串行执行写操作
                         result = _execute_single_tool(
                             call, tools, cwd, permissions, runtime, store, step,
                             on_tool_start, on_tool_result, tool_scheduler,
@@ -1264,11 +1276,12 @@ def run_agent_turn(
                         on_tool_result(call["toolName"], result.output, not result.ok)
                 
                 saw_tool_result = True
+                # 对每个工具结果
                 if not result.ok:
                     tool_error_count += 1
                     # Use ErrorClassifier for intelligent error handling
-                    classified = ErrorClassifier.classify(result.output, tool_name=call["toolName"])
-                    nudge = NudgeGenerator.generate(classified, retry_count=tool_error_count)
+                    classified = ErrorClassifier.classify(result.output, tool_name=call["toolName"]) # 智能错误分类
+                    nudge = NudgeGenerator.generate(classified, retry_count=tool_error_count) # 生成纠错提示
                     # Append nudge to tool result content for model context
                     result_output = result.output + "\n\n[System note: " + nudge + "]"
                 else:
@@ -1346,6 +1359,7 @@ def run_agent_turn(
                     decoupling_controller.compute_decoupling_matrix()
 
                 if orch:
+                    # 反馈 + 自愈
                     step_summary = orch.step_end(
                         tool_scheduler=tool_scheduler,
                         context_manager=context_manager,
@@ -1447,6 +1461,7 @@ def run_agent_turn(
                         {"type": "error", "count": tool_error_count, "content": f"{tool_error_count} errors"} if tool_error_count > 0 else {},
                         {"type": "assistant", "steps": step},
                     ]
+                    # 任务反思 → 记忆写入
                     orch.reflect_on_task(
                         task_description=task.raw_input if hasattr(task, 'raw_input') else str(task.id),
                         step=step,

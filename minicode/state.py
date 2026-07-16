@@ -66,7 +66,7 @@ class Store(Generic[T]):
         self._state = next_state
         self._update_count += 1
         
-        # Notify subscribers
+        # 通知订阅者
         for listener in self._listeners:
             try:
                 listener()

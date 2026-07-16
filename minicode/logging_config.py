@@ -108,7 +108,7 @@ def setup_logging(
         file_formatter = logging.Formatter(FILE_FORMAT)
         console_formatter = logging.Formatter(CONSOLE_FORMAT)
     
-    # 文件 handler — 使用 RotatingFileHandler 防止日志无限增长
+    # 文件 handler — 使用 RotatingFileHandler 防止日志无限增长，记录所有级别
     if log_to_file:
         # RotatingFileHandler: 按大小轮转
         file_handler = logging.handlers.RotatingFileHandler(
@@ -121,10 +121,10 @@ def setup_logging(
         file_handler.setFormatter(file_formatter)
         root_logger.addHandler(file_handler)
     
-    # 控制台 handler
+    # 控制台 handler，记录用户指定级别
     if log_to_console:
         console_handler = logging.StreamHandler(sys.stderr)
-        console_handler.setLevel(getattr(logging, level.upper(), logging.WARNING))
+        console_handler.setLevel(getattr(logging, level.upper(), logging.WARNING)) # 默认只显示 WARNING
         console_handler.setFormatter(console_formatter)
         root_logger.addHandler(console_handler)
     

@@ -323,10 +323,10 @@ def detect_provider(model: str, runtime: dict | None = None) -> Provider:
     """
     model_lower = model.lower()
 
-    # 1. OpenRouter detection
+    # 1. OpenRouter 检测
     if os.environ.get("OPENROUTER_API_KEY") or model_lower.startswith("openrouter/"):
         return Provider.OPENROUTER
-    # Also check provider prefix patterns like "anthropic/", "openai/", "google/"
+    # 检查 provider 前缀
     for prefix in ("anthropic/", "openai/", "google/", "meta-llama/", "deepseek/",
                    "qwen/", "minimax/", "mistralai/"):
         if model_lower.startswith(prefix):
@@ -338,7 +338,7 @@ def detect_provider(model: str, runtime: dict | None = None) -> Provider:
             # Default to OpenRouter for vendor-prefixed models
             return Provider.OPENROUTER
 
-    # 2. DeepSeek direct API detection
+    # 2. DeepSeek 直连 API
     if model_lower.startswith("deepseek") or "deepseek" in model_lower:
         if os.environ.get("DEEPSEEK_API_KEY"):
             return Provider.CUSTOM
@@ -346,7 +346,7 @@ def detect_provider(model: str, runtime: dict | None = None) -> Provider:
         if model in BUILTIN_MODELS and BUILTIN_MODELS[model].provider == Provider.CUSTOM:
             return Provider.CUSTOM
 
-    # 3. OpenAI detection
+    # 3. OpenAI 检测
     openai_prefixes = ("gpt-4", "gpt-3.5", "o1-", "o3-", "chatgpt-")
     openai_exact = {"gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "o1", "o1-mini", "o3-mini"}
     if model_lower in openai_exact or any(model_lower.startswith(p) for p in openai_prefixes):
@@ -354,7 +354,7 @@ def detect_provider(model: str, runtime: dict | None = None) -> Provider:
     if os.environ.get("OPENAI_API_KEY") and not os.environ.get("ANTHROPIC_API_KEY"):
         return Provider.OPENAI
 
-    # 3. Custom endpoint detection
+    # 3. Custom endpoint 检测
     custom_base = (
         os.environ.get("CUSTOM_API_BASE_URL", "")
         or (runtime or {}).get("customBaseUrl", "")
@@ -362,7 +362,7 @@ def detect_provider(model: str, runtime: dict | None = None) -> Provider:
     if custom_base:
         return Provider.CUSTOM
 
-    # 4. Default: Anthropic
+    # 4. 默认：Anthropic
     return Provider.ANTHROPIC
 
 
@@ -534,14 +534,18 @@ def create_model_adapter(
     Returns:
         A ModelAdapter instance (AnthropicModelAdapter, OpenAIModelAdapter, or MockModelAdapter)
     """
+
+    # 1.Mock 模式
     if force_mock or os.environ.get("MINI_CODE_MODEL_MODE") == "mock":
         from minicode.mock_model import MockModelAdapter
         return MockModelAdapter()
 
+    # 2.检测 provider
     provider_config = build_provider_config(model, runtime)
 
-    # OpenRouter / Custom / OpenAI all use OpenAI-compatible API
+    # 3.根据类型创建 adapter
     if provider_config.is_openai_compatible:
+        # OpenAI / OpenRouter / Custom 都用 OpenAI adapter
         from minicode.openai_adapter import OpenAIModelAdapter
         # Inject provider config into runtime so the adapter can use it
         enriched_runtime = dict(runtime or {})
@@ -560,7 +564,7 @@ def create_model_adapter(
             enriched_runtime["openaiApiKey"] = provider_config.api_key
         return OpenAIModelAdapter(enriched_runtime, tools)
 
-    # Anthropic
+    # Anthropic 用 Anthropic adapter
     from minicode.anthropic_adapter import AnthropicModelAdapter
     enriched = dict(runtime or {})
     if "model" not in enriched:

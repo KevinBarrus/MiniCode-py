@@ -12,7 +12,7 @@ from minicode.config import MINI_CODE_PERMISSIONS_PATH
 # Auto mode integration
 from minicode.auto_mode import AutoModeChecker, PermissionMode, get_mode_state
 
-# 权限决策类型 — 对齐 TS 版 PermissionDecision
+# 权限决策类型
 PermissionDecision = Literal[
     "allow_once",
     "allow_always",
@@ -98,6 +98,7 @@ def _classify_dangerous_command(command: str, args: list[str]) -> str | None:
     normalized_args = [arg.strip() for arg in args if arg.strip()]
     signature = _format_command_signature(command, normalized_args)
 
+    # git reset --hard 危险
     if command == "git":
         if "reset" in normalized_args and "--hard" in normalized_args:
             return f"git reset --hard can discard local changes ({signature})"
@@ -113,7 +114,7 @@ def _classify_dangerous_command(command: str, args: list[str]) -> str | None:
     if command == "npm" and "publish" in normalized_args:
         return f"npm publish affects a registry outside this machine ({signature})"
 
-    # 灾难性删除命令检测
+    # 灾难性删除命令检测，rm -rf 危险
     if command == "rm":
         # 组合所有标志（支持 -rf, -fr, -Rf, -r -f 等）
         combined_flags = "".join(arg for arg in normalized_args if arg.startswith("-")).lower()
@@ -129,11 +130,12 @@ def _classify_dangerous_command(command: str, args: list[str]) -> str | None:
     if command in {"dd", "mkfs", "mkfs.ext4", "mkfs.vfat", "fdisk", "format"}:
         return f"{command} can modify or destroy disk partitions ({signature})"
 
-    # 权限全开命令检测
+    # 权限全开命令检测，chmod 777 危险
     if command == "chmod":
         if "777" in normalized_args or any(arg.endswith("777") for arg in normalized_args):
             return f"chmod 777 opens permissions to all users ({signature})"
 
+    # 可执行任意代码
     if command in {
         "node", "python", "python3", "pythonw",
         "bun", "bash", "sh", "zsh", "fish",
@@ -141,7 +143,7 @@ def _classify_dangerous_command(command: str, args: list[str]) -> str | None:
     }:
         return f"{command} can execute arbitrary local code ({signature})"
 
-    # macOS-specific dangerous commands
+    # macOS 特有的危险命令
     if command == "diskutil":
         return f"diskutil can erase or partition disks ({signature})"
     if command == "csrutil":
@@ -262,19 +264,19 @@ class PermissionManager:
 
     def ensure_path_access(self, target_path: str, intent: str) -> None:
         normalized_target = _normalize_path(target_path)
-        
-        # Fast path: check workspace root first (most common case)
-        # workspace_root is already normalized, so no need for Path.resolve() again
+
+        # 1.快速路径：在工作目录内，直接允许
         if _is_within_directory(self.workspace_root, normalized_target):
             return
         
-        # Check denial sets first (fail fast)
+        # 2.检查拒绝集合（失败快速）
         if normalized_target in self.session_denied_paths or _matches_directory_prefix(normalized_target, self.denied_directory_prefixes):
             raise RuntimeError(f"Access denied for path outside cwd: {normalized_target}")
         
-        # Check approval sets
+        # 3.检查已批准集合
         if normalized_target in self.session_allowed_paths or _matches_directory_prefix(normalized_target, self.allowed_directory_prefixes):
-            return
+            return # 已批准过
+
         if normalized_target in self.session_denied_paths or _matches_directory_prefix(normalized_target, self.denied_directory_prefixes):
             raise RuntimeError(f"Access denied for path outside cwd: {normalized_target}")
         if normalized_target in self.session_allowed_paths or _matches_directory_prefix(normalized_target, self.allowed_directory_prefixes):
@@ -293,6 +295,8 @@ class PermissionManager:
             )
 
         scope_directory = normalized_target if intent in {"list", "command_cwd"} else str(Path(normalized_target).parent)
+
+        # 4.需要审批，调用 prompt
         result = self.prompt(
             {
                 "kind": "path",
@@ -311,13 +315,15 @@ class PermissionManager:
                 ],
             }
         )
+
+        # 5.根据用户决策处理
         decision = result.get("decision")
         if decision == "allow_once":
             self.session_allowed_paths.add(normalized_target)
             return
         if decision == "allow_always":
             self.allowed_directory_prefixes.add(scope_directory)
-            self._persist()
+            self._persist() # 写入配置文件
             return
         if decision == "deny_always":
             self.denied_directory_prefixes.add(scope_directory)

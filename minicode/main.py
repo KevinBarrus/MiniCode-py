@@ -76,7 +76,10 @@ def _append_transcript(transcript: list[TranscriptEntry], **kwargs) -> None:
 def _make_cli_permission_prompt():
     """Create a simple CLI-based permission prompt for non-TTY fallback."""
     def _prompt(request: dict) -> dict:
+        # 1.打印权限请求摘要
         print(f"\n{request.get('summary', 'Permission Request')}")
+
+        # 2.如果有多个选项，显示选项
         choices = request.get("choices", [])
         if choices:
             for choice in choices:
@@ -85,6 +88,7 @@ def _make_cli_permission_prompt():
             for choice in choices:
                 if answer == choice.get("key"):
                     return {"decision": choice.get("decision", "allow_once")}
+        # 简单的 y/n 确认
         answer = input("Allow? (y/n): ").strip().lower()
         return {"decision": "allow_once" if answer in ("y", "yes") else "deny_once"}
     return _prompt
@@ -107,8 +111,10 @@ def _save_transcript_file(cwd: str, permissions, transcript: list[TranscriptEntr
     return str(target)
 
 def main() -> None:
+    # Unicode 配置，Windows 默认编码可能不是 utf-8，会导致中文输出乱码
     _configure_stdio_for_unicode()
 
+    # 定义参数
     parser = argparse.ArgumentParser(
         description="MiniCode Python - A lightweight terminal coding assistant",
         add_help=True,
@@ -150,30 +156,33 @@ def main() -> None:
         help="Set logging level (default: WARNING)",
     )
 
+    # 解析参数：如果有非预定义参数，且全都以 -- 开头，就报错，否则可能是子命令的参数，不报错，后续路由到 management command 处理器
     args, remaining_argv = parser.parse_known_args()
     if remaining_argv and not any(not arg.startswith("--") for arg in remaining_argv):
         parser.error(f"unrecognized arguments: {' '.join(remaining_argv)}")
 
-    # Initialize logging
+    # 日志初始化
     from minicode.logging_config import setup_logging
     setup_logging(level=args.log_level)
 
-    # Run config validation if requested
+    # 特殊命令处理
+    # 验证配置
     if args.validate_config:
         from minicode.config import format_config_diagnostic
         print(format_config_diagnostic())
         return
     
-    # Run installer if requested
+    # 运行安装程序
     if args.install:
         from minicode.install import main as install_main
         install_main()
         return
-    
+
+    # 处理管理命令
     cwd = str(Path.cwd())
     argv = remaining_argv
-    
-    # Filter out our custom args before passing to management commands
+
+    # 在交由 management commands 之前过滤出不以 -- 开头的预定义参数
     management_argv = [a for a in argv if not a.startswith("--")]
     if maybe_handle_management_command(cwd, management_argv):
         return
@@ -203,7 +212,7 @@ def main() -> None:
     tools = create_default_tool_registry(cwd, runtime=runtime)
     permissions = PermissionManager(cwd, prompt=prompt_handler)
     
-    # Use unified model registry for adapter creation
+    # 创建模型适配器，统一接口，屏蔽底层 API 差异
     force_mock = runtime is None
     model = create_model_adapter(
         model=runtime.get("model", "") if runtime else "",
@@ -212,7 +221,7 @@ def main() -> None:
         force_mock=force_mock,
     )
     
-    # Initialize ContextManager for context window management
+    # 初始化上下文管理器，管理上下文窗口
     from minicode.context_manager import ContextManager
     from minicode.logging_config import get_logger
     logger = get_logger("main")
@@ -221,20 +230,20 @@ def main() -> None:
         context_mgr = ContextManager(model=runtime.get("model", "default"))
         logger.info("Context manager initialized for model: %s", runtime.get("model", "unknown"))
     
-    # Initialize MemoryManager for cross-session knowledge retention
+    # 初始化记忆管理器，用于跨会话知识保留
     from minicode.memory import MemoryManager
     memory_mgr = MemoryManager(project_root=Path(cwd))
     logger.info("Memory manager initialized")
     
-    # Initialize UserProfileManager for user preferences
+    # 初始化用户个人资料管理器
     from minicode.user_profile import UserProfileManager
     profile_manager = UserProfileManager(cwd=cwd)
-    profile_manager.load_merged()
+    profile_manager.load_merged() # 合并全局和项目配置
     logger.info("User profile manager initialized (global=%s, project=%s)",
                 profile_manager.global_path.exists(),
                 profile_manager.project_path.exists())
     
-    # Initialize Store for global state management (inspired by Claude Code's Zustand store)
+    # 初始化用于全局状态管理的存储（灵感来自 Claude Code 的 Zustand 存储）
     from minicode.state import create_app_store
     app_store = create_app_store(
         initial={
@@ -254,7 +263,7 @@ def main() -> None:
                 {
                     "skills": tools.get_skills(),
                     "mcpServers": tools.get_mcp_servers(),
-                    "memory_context": memory_mgr.get_relevant_context(),  # Inject memory
+                    "memory_context": memory_mgr.get_relevant_context(),  # 注入记忆
                 },
             ),
         }
@@ -283,13 +292,19 @@ def main() -> None:
         print("")
 
     try:
+        # 判断是否为交互式终端
         if not sys.stdin.isatty():
-            for raw_input in sys.stdin:
+            # 不是交互式终端
+            for raw_input in sys.stdin: # 循环读取 stdin
                 user_input = raw_input.strip()
                 if not user_input:
-                    continue
+                    continue # 跳过空行
+
+                # 1.处理 /exit 命令
                 if user_input == "/exit":
-                    break
+                    break # 退出循环
+
+                # 2.处理 /transcript-save 命令
                 if user_input.startswith("/transcript-save "):
                     output_path = user_input[len("/transcript-save ") :].strip()
                     if not output_path:
@@ -298,18 +313,24 @@ def main() -> None:
                     saved_path = _save_transcript_file(cwd, permissions, transcript, output_path)
                     print(f"Saved transcript to {saved_path}")
                     continue
+
+                # 3.处理 Memory 命令
                 memory_result = memory_mgr.handle_user_memory_input(user_input)
                 if memory_result is not None:
                     _append_transcript(transcript, kind="user", body=user_input)
                     _append_transcript(transcript, kind="assistant", body=memory_result)
                     print(memory_result)
                     continue
+
+                # 4.处理本地命令
                 local_result = _handle_local_command(user_input, tools)
                 if local_result is not None:
                     _append_transcript(transcript, kind="user", body=user_input)
                     _append_transcript(transcript, kind="assistant", body=local_result)
                     print(local_result)
                     continue
+
+                # 5.处理工具快捷方式
                 shortcut = parse_local_tool_shortcut(user_input)
                 if shortcut is not None:
                     _append_transcript(transcript, kind="user", body=user_input)
@@ -327,10 +348,14 @@ def main() -> None:
                     )
                     print(result.output)
                     continue
+
+                # 6.调用 Agent Turn
                 _append_transcript(transcript, kind="user", body=user_input)
                 messages.append({"role": "user", "content": user_input})
                 history.append(user_input)
                 save_history_entries(history)
+
+                # 重构 system prompt, 注入 Memory
                 messages[0] = {
                     "role": "system",
                     "content": build_system_prompt(
@@ -343,7 +368,9 @@ def main() -> None:
                         },
                     ),
                 }
-                permissions.begin_turn()
+                permissions.begin_turn() # 开始权限追踪
+
+                # 核心调用！
                 messages = run_agent_turn(
                     model=model,
                     tools=tools,
@@ -354,17 +381,19 @@ def main() -> None:
                     context_manager=context_mgr,
                     runtime=runtime,
                 )
-                permissions.end_turn()
+                permissions.end_turn() # 结束权限追踪
                 
-                # Log context usage after turn
+                # 一轮对话结束后，将上下文使用量记录到日志中
                 if context_mgr:
                     stats = context_mgr.get_stats()
                     logger.debug("After turn: %d tokens (%.0f%%)", stats.total_tokens, stats.usage_percentage)
+
+                # 获取 assistant 响应并显示
                 last_assistant = next((message for message in reversed(messages) if message["role"] == "assistant"), None)
                 if last_assistant:
                     _append_transcript(transcript, kind="assistant", body=last_assistant["content"])
                     print(last_assistant["content"])
-            return
+            return # 非 TTY 模式结束
 
         run_tty_app(
             runtime=runtime,
@@ -381,14 +410,14 @@ def main() -> None:
     except KeyboardInterrupt:
         print("\n\nInterrupted by user. Shutting down gracefully...")
     finally:
-        # Graceful shutdown: clean up all resources
+        # 优雅关闭：释放所有资源
         from minicode.logging_config import get_logger
         logger = get_logger("main")
         logger.info("Shutting down...")
         
-        # Dispose tools (closes MCP connections)
+        # 处理工具（关闭 MCP 连接）
         try:
-            tools.dispose()
+            tools.dispose() # 清理工具
             logger.info("Tools disposed successfully")
         except Exception as e:
             logger.warning("Error disposing tools: %s", e)

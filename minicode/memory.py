@@ -479,8 +479,8 @@ def _bm25_score(
     idf: dict[str, float],
     avgdl: float,
     *,
-    k1: float = _BM25_K1,
-    b: float = _BM25_B,
+    k1: float = _BM25_K1, # 饱和参数
+    b: float = _BM25_B, # 长度归一化参数
 ) -> float:
     """Compute Okapi BM25 score between query and document.
 
@@ -499,9 +499,10 @@ def _bm25_score(
     for term in set(query_tokens):
         if term not in idf:
             continue
-        tf = tf_doc.get(term, 0.0)
+        tf = tf_doc.get(term, 0.0) # 词频
         if tf == 0:
             continue
+        # BM25 公式
         numerator = tf * (k1 + 1)
         denominator = tf + k1 * (1 - b + b * (total_tokens / avgdl))
         score += idf[term] * (numerator / denominator)
@@ -1285,6 +1286,7 @@ class MemoryManager:
         scopes_to_search = [scope] if scope else list(MemoryScope)
 
         for s in scopes_to_search:
+            # 每个记忆文件调用 search
             results.extend(self.memories[s].search(query, active_domains=active_domains))
 
         # Apply minimum relevance threshold
@@ -1314,26 +1316,35 @@ class MemoryManager:
         return deduped[:limit]
 
     def _score_entry(self, entry: MemoryEntry, query_tokens: list[str]) -> float:
-        """Compute relevance score for a memory entry."""
+        """计算记忆条目的相关性分数"""
         if not query_tokens:
             return 0.0
 
+        # 1.查询词扩展
         query_tokens_expanded = _expand_query_terms(query_tokens)
+
+        # 2.记忆条目分词
         entry_tokens = _tokenize(
             f"{entry.content} {entry.category} {' '.join(entry.tags)}"
         )
+
+        # 3.计算 IDF
         idf = _compute_idf([entry_tokens])
+
+        # 4.BM25 分数(TF-IDF 改进版)
         avgdl = len(entry_tokens)
         bm25 = _bm25_score(query_tokens_expanded, entry_tokens, idf, avgdl)
-
         query_lower = " ".join(query_tokens).lower()
         content_lower = entry.content.lower()
+
+        # 5.子串匹配加分
         substring_score = 0.0
         if query_lower in content_lower:
             substring_score = 2.0
         elif any(q in content_lower for q in query_tokens):
             substring_score = 1.0
 
+        # 6.标签匹配加分
         tag_score = 0.0
         exact_tag_match = any(tag.lower() == query_lower for tag in entry.tags)
         partial_tag_match = any(query_lower in tag.lower() for tag in entry.tags)
@@ -1344,11 +1355,14 @@ class MemoryManager:
         if query_lower in entry.category.lower():
             tag_score += 1.0
 
+        # 7.使用频率加分
         usage_bonus = math.log1p(entry.usage_count) * 0.3
 
+        # 8.新近度加分
         age_hours = (time.time() - entry.updated_at) / 3600
         recency_bonus = 1.0 / (1.0 + age_hours / 24.0) * 0.5
 
+        # 总分
         return bm25 + substring_score + tag_score + usage_bonus + recency_bonus
     
     def get_relevant_context(

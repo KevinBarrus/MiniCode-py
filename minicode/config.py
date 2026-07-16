@@ -111,10 +111,10 @@ def merge_settings(base: dict[str, Any], override: dict[str, Any]) -> dict[str, 
 
 
 def load_effective_settings(cwd: str | Path | None = None) -> dict[str, Any]:
-    claude_settings = read_settings_file(CLAUDE_SETTINGS_PATH)
-    global_mcp = read_mcp_config_file(MINI_CODE_MCP_PATH)
-    project_mcp = read_mcp_config_file(project_mcp_path(cwd))
-    mini_code_settings = read_settings_file(MINI_CODE_SETTINGS_PATH)
+    claude_settings = read_settings_file(CLAUDE_SETTINGS_PATH) # Claude Code 配置
+    global_mcp = read_mcp_config_file(MINI_CODE_MCP_PATH) # 全局 MCP
+    project_mcp = read_mcp_config_file(project_mcp_path(cwd)) # 项目 MCP
+    mini_code_settings = read_settings_file(MINI_CODE_SETTINGS_PATH) # MiniCode 配置
 
     return merge_settings(
         merge_settings(
@@ -136,15 +136,20 @@ def save_mini_code_settings(updates: dict[str, Any]) -> None:
 
 
 def load_runtime_config(cwd: str | Path | None = None) -> dict[str, Any]:
+    # 加载配置
     effective = load_effective_settings(cwd)
+
+    # 合并环境变量（最高优先级）
     env = {**dict(effective.get("env", {})), **os.environ}
+
+    # 确定模型
     model = (
-        os.environ.get("MINI_CODE_MODEL")
-        or effective.get("model")
-        or str(env.get("ANTHROPIC_MODEL", "")).strip()
+        os.environ.get("MINI_CODE_MODEL") # 优先级1：环境变量
+        or effective.get("model") # 优先级2：配置文件
+        or str(env.get("ANTHROPIC_MODEL", "")).strip() # 优先级3：兼容性
     )
 
-    # --- Provider-specific base URLs ---
+    # --- 加载各 provider 的配置 ---
     # Anthropic
     base_url = str(env.get("ANTHROPIC_BASE_URL", "")).strip() or "https://api.anthropic.com"
     auth_token = str(env.get("ANTHROPIC_AUTH_TOKEN", "")).strip() or None
@@ -191,7 +196,7 @@ def load_runtime_config(cwd: str | Path | None = None) -> dict[str, Any]:
         except (TypeError, ValueError):
             max_output_tokens = None
 
-    # Validate: at least one auth method must be available
+    # 验证至少有一个认证方法
     has_auth = any([
         auth_token, api_key, openai_api_key, openrouter_api_key, custom_api_key,
     ])
@@ -203,11 +208,11 @@ def load_runtime_config(cwd: str | Path | None = None) -> dict[str, Any]:
             "OPENROUTER_API_KEY, or CUSTOM_API_KEY."
         )
 
-    # --- User profile paths ---
+    # 用户个人信息路径
     global_user_profile = MINI_CODE_USER_PROFILE_PATH
     proj_user_profile = project_user_profile_path(cwd)
 
-    # --- User preferences from settings (lightweight, not from USER.md) ---
+    # 用户偏好（来自设置）
     user_preferences = effective.get("userPreferences", {})
     response_language = (
         str(env.get("MINI_CODE_LANGUAGE", "")).strip()
@@ -218,6 +223,7 @@ def load_runtime_config(cwd: str | Path | None = None) -> dict[str, Any]:
         or user_preferences.get("verbosity", "")
     )
 
+    # 返回 runtime 对象
     return {
         "model": model,
         "baseUrl": base_url,

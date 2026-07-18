@@ -6,7 +6,7 @@ import sys
 import threading
 import time
 from typing import Any, Callable
-from minicode.tui.state import ScreenState, TtyAppArgs
+from minicode.tui.state import ScreenState, TtyAppArgs, AggregatedEditProgress
 from minicode.cli_commands import try_handle_local_command, find_matching_slash_commands
 from minicode.agent_loop import run_agent_turn
 from minicode.context_manager import save_context_state
@@ -64,13 +64,14 @@ def _win_read_one_key() -> str:
 
     ch = msvcrt.getwch()
 
-    # Special-key prefix: next char is a scan code
+    # 特殊键：两字节序列
     if ch in ("\x00", "\xe0"):
         if msvcrt.kbhit():
             scan = ord(msvcrt.getwch())
         else:
             # Prefix arrived alone (rare) — treat as Escape
             return "\x1b"
+        # 转换为 ANSI 序列
         return _WIN_SCANCODE_TO_ANSI.get(scan, "")
 
     # Ctrl+C → keep as '\x03' so parse_input_chunk handles it
@@ -149,6 +150,7 @@ class _RawModeContext:
         if sys.platform == "win32":
             # Ensure VT processing is active (idempotent)
             from minicode.tui.screen import _enable_windows_vt_processing
+            # Windows: 启用 VT 处理和 UTF-8
             _enable_windows_vt_processing()
             # Switch console to UTF-8 code page for proper Unicode handling
             try:
@@ -159,11 +161,12 @@ class _RawModeContext:
             except Exception:
                 pass
         else:
+            # Unix: 使用 termios 设置 raw mode
             import termios
             import signal
 
             fd = sys.stdin.fileno()
-            self._old_settings = termios.tcgetattr(fd)
+            self._old_settings = termios.tcgetattr(fd) # 保存原始设置
             new = termios.tcgetattr(fd)
 
             # Wire SIGWINCH to invalidate terminal size cache on resize
@@ -192,13 +195,18 @@ class _RawModeContext:
             new[2] |= termios.CS8
             # Local flags: disable echo, canonical mode, extended processing,
             # and signal generation from keys (Ctrl-C, Ctrl-Z).
+            # 禁用回显、规范模式、信号生成
             new[3] &= ~(
-                termios.ECHO | termios.ICANON | termios.IEXTEN | termios.ISIG
+                termios.ECHO | # 禁用回显，用户输入不显示在屏幕上
+                termios.ICANON |  # 禁用规范模式，按键立即传递，不等待回车
+                termios.IEXTEN |  # 禁用扩展处理
+                termios.ISIG # 禁用信号生成，Ctrl+C 不发送信号，原样传递
             )
             # Special characters: read returns after 1 byte, no timeout.
-            new[6][termios.VMIN] = 1
-            new[6][termios.VTIME] = 0
-            termios.tcsetattr(fd, termios.TCSAFLUSH, new)
+            # 设置立即返回
+            new[6][termios.VMIN] = 1 # 至少读取1字节
+            new[6][termios.VTIME] = 0 # 无超时
+            termios.tcsetattr(fd, termios.TCSAFLUSH, new) # 应用新设置
         return self
 
     def __exit__(self, *_: Any) -> None:
@@ -209,6 +217,7 @@ class _RawModeContext:
                     ctypes.windll.kernel32.SetConsoleOutputCP(self._old_cp)  # type: ignore[attr-defined]
                 except Exception:
                     pass
+        # 恢复原始设置
         elif self._old_settings is not None:
             import termios
             import signal
@@ -329,7 +338,7 @@ def _handle_input(
         )
         return False
 
-    # Local commands
+    # 检查是否是本地命令
     local_result = try_handle_local_command(input_text, tools=args.tools, cwd=args.cwd)
     # 新增调试语句
     logger.warning("LOCAL_CMD: input=%r result=%s", input_text, "HIT" if local_result else None)

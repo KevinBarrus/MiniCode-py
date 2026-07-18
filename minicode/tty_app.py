@@ -70,11 +70,12 @@ def run_tty_app(
         resume_session: Session ID to resume, or "latest" for most recent
         list_sessions_only: If True, print session list and exit
     """
-
+    # 会话加载
     if handle_session_listing(cwd, list_sessions_only):
         return messages
-
     session = load_or_create_session(cwd, resume_session)
+
+    # 状态构建
     args, state = build_tty_runtime_state(
         runtime,
         tools,
@@ -87,7 +88,7 @@ def run_tty_app(
         context_manager,
     )
 
-    # Throttled renderer: coalesces rapid rerender() calls to reduce flickering
+    # 节流渲染器：合并快速 rerender() 调用以减少闪烁
     throttled = _ThrottledRenderer(lambda: _render_screen(args, state), min_interval=0.016)
 
     def rerender() -> None:
@@ -109,35 +110,36 @@ def run_tty_app(
     _prev_sigwinch = install_sigwinch_rerender(throttled)
 
     try:
-        _render_screen(args, state)
+        _render_screen(args, state) # 初始渲染
 
-        with _RawModeContext():
-            while not should_exit:
-                # Autosave check (throttled)
+        with _RawModeContext(): # 进入 Raw Mode
+            while not should_exit: # 主循环
+                # Autosave 检查
                 _autosave_counter += 1
                 if state.autosave and _autosave_counter >= _AUTOSAVE_CHECK_INTERVAL:
                     _autosave_counter = 0
                     state.autosave.save_if_needed()
                 
-                # Check if background agent thread completed
+                # Agent 线程状态检查
                 agent_result_data = state.agent_result
                 lock = getattr(state, "agent_lock", None)
                 if agent_result_data is not None and lock is not None and agent_result_data.get("done"):
                     with lock:
                         if agent_result_data.get("messages"):
                             args.messages = agent_result_data["messages"]
-                        agent_result_data["done"] = False  # Reset flag
+                        agent_result_data["done"] = False  # 重设标志位
 
                 # Read raw input
                 if sys.platform == "win32":
                     import msvcrt
 
-                    if not msvcrt.kbhit():
+                    if not msvcrt.kbhit(): # 检查是否有按键
                         # Flush any deferred renders during idle
                         throttled.flush()
                         time.sleep(0.05)  # 从 0.02 增加到 0.05 降低 CPU 使用率
                         continue
                     # Use _win_read_one_key to translate special keys
+                    # 读取一个逻辑按键
                     chunk = ""
                     while True:
                         ch = _win_read_one_key()
@@ -148,19 +150,20 @@ def run_tty_app(
                     import select
 
                     _fd = sys.stdin.fileno()
-                    ready, _, _ = select.select([_fd], [], [], 0.05)
+                    ready, _, _ = select.select([_fd], [], [], 0.05) # 50ms 超时
                     if not ready:
-                        # Flush any deferred renders during idle
+                        # 空闲时刷新渲染
                         throttled.flush()
                         continue
                     # Use os.read() to bypass Python's TextIOWrapper/
                     # BufferedReader which can block on partial UTF-8
-                    # sequences in raw mode.
+                    # sequences in raw mode
+                    # 读取原始字节
                     _raw = os.read(_fd, 4096)
                     if not _raw:
                         should_exit = True
                         continue
-                    # Drain any remaining bytes without blocking
+                    # Drain 剩余字节
                     while True:
                         ready2, _, _ = select.select([_fd], [], [], 0)
                         if not ready2:
@@ -169,6 +172,7 @@ def run_tty_app(
                         if not _more:
                             break
                         _raw += _more
+                    # 解码为 UTF-8
                     chunk = _raw.decode("utf-8", errors="replace")
 
                 if not chunk:
@@ -180,6 +184,8 @@ def run_tty_app(
                 for event in parsed.events:
                     try:
                         _handle_tty_event(args, state, event, rerender, approval_event, approval_result, _handle_input)
+
+                        # 检查退出条件
                         if state.input == "/exit" or (
                             isinstance(event, KeyEvent)
                             and event.name == "c"
@@ -193,7 +199,7 @@ def run_tty_app(
                         # 记录事件处理错误，但不中断主循环
                         logging.debug("Event handling error: %s", e, exc_info=True)
 
-                # Ensure the final state after processing all events is visible
+                # 确保最终状态可见
                 throttled.flush()
 
     finally:

@@ -478,19 +478,21 @@ class AutosaveManager:
     def __init__(self, session: SessionData, interval: int = AUTOSAVE_INTERVAL_SECONDS):
         self.session = session
         self.interval = interval
-        self._last_save_time = time.time()  # Initialize to current time
-        self._dirty = False
+        self._last_save_time = time.time()  # 用当前时间初始化
+        self._dirty = False # 脏标记：是否有未保存的修改
         self._full_save_counter = 0
 
     def mark_dirty(self) -> None:
-        """Mark session as needing save."""
+        """标记会话需要保存"""
         self._dirty = True
 
     def should_save(self) -> bool:
-        """Check if autosave should trigger."""
+        """检查是否需要保存"""
+        # 判断条件1：是否有未保存的修改
         if not self._dirty:
             return False
         elapsed = time.time() - self._last_save_time
+        # 判断条件2：距离上次保存是否超过最小间隔
         return elapsed >= self.interval
 
     def save_if_needed(self) -> bool:

@@ -521,7 +521,7 @@ def run_agent_turn(
     project_context: str = "",
     enable_work_chain: bool = True,
 ) -> list[ChatMessage]:
-    current_messages = list(messages)
+    current_messages = list(messages) # 当前对话历史（会被修改）
     saw_tool_result = False # 本轮是否收到过工具结果
     empty_response_retry_count = 0 # 空响应重试次数
     recoverable_thinking_retry_count = 0 # thinking 中断重试
@@ -853,7 +853,7 @@ def run_agent_turn(
             # Hook: agent turn started
             fire_hook_sync(HookEvent.AGENT_START, step=step, cwd=cwd)
 
-            # 高级控制论闭环（每个 step 开始时执行）
+            # 1.高级控制论闭环（每个 step 开始时执行）
             if enable_work_chain and orch:
                 # 观测
                 orch.step_start(
@@ -873,7 +873,7 @@ def run_agent_turn(
                         error_count=tool_error_count,
                         tool_calls=0,
                     )
-                    observed_state = state_observer.update(measurement)
+                    observed_state = state_observer.update(measurement) # Kalman 状态估计
 
                     # 将 Kalman 估计值输入到控制器
                     if observed_state.confidence > 0.4:
@@ -946,7 +946,7 @@ def run_agent_turn(
 
             next_step: AgentStep
             try:
-                # 调 LLM
+                # 2.调 LLM
                 next_step = _model_next(
                     model,
                     current_messages,
@@ -1030,6 +1030,7 @@ def run_agent_turn(
                     metrics_collector.end_turn(total_tokens=0)
                 return current_messages
 
+            # 3.分类 LLM 响应
             if next_step.type == "assistant":
                 is_empty = _is_empty_assistant_response(next_step.content)
                 if not is_empty and _should_treat_assistant_as_progress(
@@ -1158,6 +1159,8 @@ def run_agent_turn(
                 call = calls[0]
                 if metrics_collector:
                     metrics_collector.start_tool(call["toolName"])
+
+                # 单工具：直接执行
                 result = _execute_single_tool(
                     call, tools, cwd, permissions, runtime, store, step,
                     on_tool_start, on_tool_result, tool_scheduler,
@@ -1169,13 +1172,13 @@ def run_agent_turn(
                     )
                 _results.append((call, result))
             else:
-                # Multiple calls — use ToolScheduler for intelligent partitioning
-                # 工具调度：读写分离
+                # 多工具：ToolScheduler 智能分区
+                # 4.并发执行工具，工具调度：读写分离
                 concurrent_calls, serial_calls = tool_scheduler.schedule_calls(calls, tools)
 
                 _results.clear()  # Reuse outer declaration
 
-                # Phase 1: Run all concurrent-safe tools in parallel
+                # Phase 1: 并发执行读操作
                 if concurrent_calls:
                     max_workers = tool_scheduler.get_recommended_max_workers(
                         concurrent_calls,
@@ -1216,7 +1219,7 @@ def run_agent_turn(
                                 result = ToolResult(ok=False, output=f"Concurrent execution error: {exc}")
                             _results.append((call, result))
 
-                # Phase 2: Run serial tools sequentially (in original order)
+                # Phase 2: 串行执行写操作（保持原始顺序）
                 if serial_calls:
                     for call in serial_calls:
                         if metrics_collector:
@@ -1276,7 +1279,7 @@ def run_agent_turn(
                         on_tool_result(call["toolName"], result.output, not result.ok)
                 
                 saw_tool_result = True
-                # 对每个工具结果
+                # 工具结果处理管线
                 if not result.ok:
                     tool_error_count += 1
                     # Use ErrorClassifier for intelligent error handling
@@ -1312,6 +1315,7 @@ def run_agent_turn(
                     file_path = call.get("input", {}).get("path", "")
                     if file_path:
                         dedup_mgr = context_compactor.read_dedup
+                        # 去重相同文件读取
                         if dedup_mgr.should_dedup(file_path, result_output):
                             result_output = dedup_mgr.get_stub(file_path)
                             logger.debug("ReadDedup replaced content for %s (stub)", file_path)
@@ -1358,8 +1362,9 @@ def run_agent_turn(
                     })
                     decoupling_controller.compute_decoupling_matrix()
 
+                # 5.控制论闭环
                 if orch:
-                    # 反馈 + 自愈
+                    # 反馈 + 自愈 + 控制信号
                     step_summary = orch.step_end(
                         tool_scheduler=tool_scheduler,
                         context_manager=context_manager,
@@ -1368,6 +1373,7 @@ def run_agent_turn(
                         saw_tool_result=saw_tool_result,
                         max_steps=max_steps,
                     )
+                    # 应用信号到运行时
                     max_steps = _apply_control_signal(
                         control_signal=step_summary.get("control_signal"),
                         system_state=step_summary.get("system_state"),

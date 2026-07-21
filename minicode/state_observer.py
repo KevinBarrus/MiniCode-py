@@ -59,9 +59,17 @@ class KalmanFilter:
         self.uncertainty = initial_uncertainty
 
     def update(self, measurement: float) -> float:
+
+        # step1 : 预测不确定性（这次估计有多不准？）
         prediction_uncertainty = self.uncertainty + self.process_noise
+
+        # step2 : 计算卡尔曼增益（应该信任测量值多少？）
         kalman_gain = prediction_uncertainty / (prediction_uncertainty + self.measurement_noise)
+
+        # step3 : 更新估计值（测量值和之前估计值的加权平均）
         self.estimate = self.estimate + kalman_gain * (measurement - self.estimate)
+
+        # step4 : 更新不确定性（越更新，越确定）
         self.uncertainty = (1.0 - kalman_gain) * prediction_uncertainty
         self.uncertainty = max(0.0, min(1.0, self.uncertainty))
         return self.estimate
@@ -97,22 +105,32 @@ class StateObserver:
     """
 
     def __init__(self):
+
+        # 真实负载
         self._internal_load_kf = KalmanFilter(
             process_noise=0.02, measurement_noise=0.15,
             initial_estimate=0.0, initial_uncertainty=0.5,
         )
+
+        # 隐藏错误概率
         self._hidden_errors_kf = KalmanFilter(
             process_noise=0.01, measurement_noise=0.2,
             initial_estimate=0.0, initial_uncertainty=0.5,
         )
+
+        # 上下文压力
         self._context_pressure_kf = KalmanFilter(
             process_noise=0.03, measurement_noise=0.1,
             initial_estimate=0.0, initial_uncertainty=0.5,
         )
+
+        # 技能掌握度
         self._skill_mastery_kf = KalmanFilter(
             process_noise=0.05, measurement_noise=0.25,
             initial_estimate=0.5, initial_uncertainty=0.8,
         )
+
+        # 系统退化程度
         self._system_degradation_kf = KalmanFilter(
             process_noise=0.005, measurement_noise=0.1,
             initial_estimate=0.0, initial_uncertainty=0.3,
@@ -126,6 +144,7 @@ class StateObserver:
         self._sample_count: int = 0
 
     def update(self, measurement: MeasurementVector) -> ObservedState:
+        # 每个可测量量，对应一个 Kalman Filter 的输入
         self._measurement_history.append(measurement)
         if len(self._measurement_history) > self._max_history:
             self._measurement_history.pop(0)
@@ -134,10 +153,29 @@ class StateObserver:
         if self._sample_count == 1:
             self._response_time_baseline = measurement.response_time
 
+        # 输入：response_time (LLM 响应时间)
+        # 隐藏状态的物理意义：
+        # 如果 response_time 突然变大，内部负载可能很高
+        # Kalman 会平滑这个推断，不会因为一次慢响应就断定高负载
         internal_load = self._estimate_internal_load(measurement)
+
+        # 输入：success_rate （工具成功率）
+        # 隐藏状态的物理意义：
+        # 长功率高不代表没有隐藏问题，可能只是还没触发
+        # Kalman 根据成功率的趋势推断隐藏错误的概率
         hidden_errors = self._estimate_hidden_errors(measurement)
+
+        # 输入：context_length（上下文长度）
+        # 隐藏状态的物理意义：
+        # 上下文快到上限时，即使还没报错，压力已经存在
+        # Kalman 提前感知这种压力
         context_pressure = self._estimate_context_pressure(measurement)
+
         skill_mastery = self._estimate_skill_mastery(measurement)
+
+        # 输入：综合 internal_load + hidden_errors + context_pressure
+        # 隐藏状态的物理意义：
+        # 系统整体是否在退化（多个指标同时恶化）
         system_degradation = self._estimate_system_degradation(measurement)
 
         overall_confidence = (

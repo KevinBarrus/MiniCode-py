@@ -118,9 +118,9 @@ class MovingAveragePredictor:
         if short_avg is None or medium_avg is None or long_avg is None:
             return "stable"
 
-        if short_avg > medium_avg > long_avg:
+        if short_avg > medium_avg > long_avg: # 加速上升
             return "up"
-        elif short_avg < medium_avg < long_avg:
+        elif short_avg < medium_avg < long_avg: # 加速下降
             return "down"
         return "stable"
 
@@ -196,8 +196,8 @@ class PredictiveController:
         ]
         for metric in metrics:
             self._predictors[metric] = {
-                "exp_smoother": ExponentialSmoother(alpha=0.3),
-                "ma_predictor": MovingAveragePredictor(),
+                "exp_smoother": ExponentialSmoother(alpha=0.3), # 指数平滑
+                "ma_predictor": MovingAveragePredictor(), # 移动平均
                 "last_prediction": None,
                 "prediction_count": 0,
             }
@@ -272,14 +272,14 @@ class PredictiveController:
                 continue
 
             prediction = predictor["last_prediction"]
-            if prediction.confidence < 0.5:
+            if prediction.confidence < 0.5: # 预测不够可信，跳过
                 continue
 
-            action = self._assess_prediction(metric_name, prediction)
+            action = self._assess_prediction(metric_name, prediction) # 核心
             if action:
                 actions.append(action)
 
-        actions.sort(key=lambda a: a.urgency, reverse=True)
+        actions.sort(key=lambda a: a.urgency, reverse=True) # 按紧急度排序
         return actions
 
     def record_actual(self, metric_name: str, actual_value: float) -> None:
@@ -325,6 +325,7 @@ class PredictiveController:
         return summary
 
     def _assess_prediction(self, metric_name: str, prediction: PredictionResult) -> PredictiveAction | None:
+        # 每个指标定义了自己的危险阈值
         thresholds = {
             "response_time": {"high": 45.0, "low": 5.0},
             "error_rate": {"high": 3.0, "low": 0.0},
@@ -341,7 +342,10 @@ class PredictiveController:
 
         thresh = thresholds[metric_name]
 
+        # 条件1：向上突破的指标（越高越危险）
         if prediction.predicted_value > thresh["high"] and prediction.trend_direction == "up":
+
+            # urgency = 超出阈值的比例
             urgency = min(1.0, (prediction.predicted_value - thresh["high"]) / thresh["high"])
 
             actions_map = {
@@ -364,6 +368,7 @@ class PredictiveController:
                     deadline_steps=deadline,
                 )
 
+        # 条件2：向下突破的质保（越低越危险，如稳定性）
         if metric_name in ("stability_score", "performance_score"):
             if prediction.predicted_value < thresh["low"] and prediction.trend_direction == "down":
                 urgency = min(1.0, (thresh["low"] - prediction.predicted_value) / thresh["low"])

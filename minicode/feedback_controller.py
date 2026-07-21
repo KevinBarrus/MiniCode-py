@@ -125,17 +125,17 @@ class PIDController:
             measured: Current measured value
             dt: Time delta since last computation
         """
-        error = setpoint - measured
+        error = setpoint - measured # 当前偏差
 
         # Proportional
-        p = self.kp * error
+        p = self.kp * error # 比例项：对应当前偏差
 
-        # Integral (with anti-windup)
+        # 积分项：累积偏差（消除稳态误差）
         self._state.integral += error * dt
         self._state.integral = max(-10.0, min(10.0, self._state.integral))
         i = self.ki * self._state.integral
 
-        # Derivative
+        # 微分项：偏差变化率（预测趋势）
         d = self.kd * (error - self._state.previous_error) / max(dt, 0.001)
         self._state.previous_error = error
 
@@ -168,14 +168,15 @@ class FeedbackController:
 
     def __init__(self):
         # PID controllers for key variables
+        # 3个独立 PID, 分别控制三个维度
         self._stability_pid = PIDController(kp=1.5, ki=0.2, kd=0.1)
         self._performance_pid = PIDController(kp=1.0, ki=0.15, kd=0.08)
         self._efficiency_pid = PIDController(kp=0.8, ki=0.1, kd=0.05)
 
-        # Setpoints (desired values)
-        self._stability_target = 0.85
-        self._performance_target = 0.75
-        self._efficiency_target = 0.60
+        # 各自的理想值
+        self._stability_target = 0.85 # 希望稳定性 > 85%
+        self._performance_target = 0.75 # 希望性能 > 75%
+        self._efficiency_target = 0.60 # 希望效率 > 60%
 
         # Historical states for derivative calculation
         self._previous_state: SystemState | None = None
@@ -200,6 +201,7 @@ class FeedbackController:
 
         # --- Negative Feedback Loop (负反馈：纠正偏差) ---
         stability = state.stability_score()
+        # 稳定性 PID
         stability_output = self._stability_pid.compute(self._stability_target, stability, dt)
 
         performance = state.performance_score()
@@ -208,51 +210,51 @@ class FeedbackController:
         efficiency = state.token_efficiency
         efficiency_output = self._efficiency_pid.compute(self._efficiency_target, efficiency, dt)
 
-        # Apply stability controls
+        # 稳定性 PID
         if stability_output > 0.3:
-            # System too unstable, apply corrective measures
-            signal.reduce_parallelism = True
-            signal.increase_nudge_frequency = True
+            # 稳定性低于目标
+            signal.reduce_parallelism = True # 减少并发
+            signal.increase_nudge_frequency = True # 更频繁引导 LLM
             signal.reason = f"低稳定性 ({stability:.2f})，启动负反馈调节"
 
-            if state.error_frequency > 3.0:
-                signal.reduce_tool_timeout = 15.0  # Reduce timeout for fast failure
-                signal.limit_max_steps = 20  # Limit max steps
+            if state.error_frequency > 3.0: # 错误率非常高
+                signal.reduce_tool_timeout = 15.0  # 缩短超时（快速失败）
+                signal.limit_max_steps = 20  # 限制步数
                 signal.reason += " + 错误频率过高"
 
-            if state.context_usage > 0.85:
-                signal.force_compaction = True
+            if state.context_usage > 0.85: # 上下文快满了
+                signal.force_compaction = True # 强制压缩
                 signal.reason += " + 上下文超载"
 
-        elif stability_output < -0.3:
+        elif stability_output < -0.3: # 稳定性高于目标
             # System overly stable, can afford more aggressive behavior
-            signal.adjust_concurrency = 2  # Allow more parallel tools
+            signal.adjust_concurrency = 2  # 可以更大胆，增加并发
             signal.reason = f"系统稳定 ({stability:.2f})，可适当增加并发"
 
-        # Apply performance controls
-        if performance_output > 0.3:
+        # 性能 PID
+        if performance_output > 0.3: # 性能不足
             # Underperforming, consider using better model
-            if state.avg_response_time > 30.0:
-                signal.increase_model_level = True
+            if state.avg_response_time > 30.0: # 响应太慢
+                signal.increase_model_level = True # 升级模型
                 signal.reason = f"性能不足 ({performance:.2f})，建议升级模型"
 
-        elif performance_output < -0.3:
+        elif performance_output < -0.3: # 性能超过目标
             # Overperforming, can use cheaper model
-            if state.success_rate > 0.9:
-                signal.decrease_model_level = True
+            if state.success_rate > 0.9: # 成功率很高
+                signal.decrease_model_level = True # 降级模型省钱
                 signal.reason = f"性能优异 ({performance:.2f})，可降级模型节约成本"
 
-        # Apply efficiency controls
-        if efficiency_output > 0.3:
+        # 效率 PID
+        if efficiency_output > 0.3: # 效率不足
             # Low efficiency, reduce token budget
-            signal.adjust_token_budget = 0.7
+            signal.adjust_token_budget = 0.7 # 收紧 token 预算
             signal.reason += f" 效率不足 ({efficiency:.2f})"
 
-        # --- Positive Feedback Loop (正反馈：强化有效模式) ---
+        # 正反馈：强化有效模式
         if performance > 0.85 and state.pattern_reuse_rate > 0.3:
             # High performance with pattern reuse - reinforce
-            signal.recommend_skill_update = True
-            signal.suggest_memory_persistence = True
+            signal.recommend_skill_update = True # 推荐技能更新
+            signal.suggest_memory_persistence = True # 持久化记忆
             signal.reason = f"高效运行 ({performance:.2f})，启动正反馈强化"
 
         # Update oscillation history
@@ -302,11 +304,12 @@ class FeedbackController:
         if len(self._error_history) < 4:
             return 0.0
 
+        # 统计最近 N 个误差值中，方向变化的次数
         direction_changes = 0
         for i in range(2, len(self._error_history)):
             prev_delta = self._error_history[i - 1] - self._error_history[i - 2]
             curr_delta = self._error_history[i] - self._error_history[i - 1]
-            if prev_delta * curr_delta < 0:
+            if prev_delta * curr_delta < 0: # 方向发生变化
                 direction_changes += 1
 
         return direction_changes / (len(self._error_history) - 2)

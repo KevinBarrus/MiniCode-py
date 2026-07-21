@@ -114,6 +114,7 @@ class CyberneticOrchestrator:
         runtime: dict | None = None,
     ) -> None:
         """Initialize all controllers. Call once at task start."""
+        # 所有控制器都在这里创建，创建后它们之间没有任何通信，Orchestrator 是唯一的协调点
         self._last_model = model
         self.feedback = FeedbackController()
         self.cyber_supervisor = CyberneticSupervisor()
@@ -187,7 +188,7 @@ class CyberneticOrchestrator:
         if self.state_observer:
             measurement = MeasurementVector(
                 timestamp=time.time(),
-                response_time=step * 2.0,
+                response_time=step * 2.0, # 估算值
                 success_rate=1.0 - (tool_error_count / max(step, 1)),
                 context_length=(
                     context_manager.get_stats().total_tokens if context_manager else 0
@@ -227,14 +228,14 @@ class CyberneticOrchestrator:
         """Called at end of step (finally block). Returns a summary dict."""
         summary: dict[str, Any] = {}
 
-        # Feedback pattern recording
+        # 记录本步的模式是否有效，为后续正反馈准备数据
         if self.feedback:
             pattern_id = f"step_{step}"
             self.feedback.record_pattern_effectiveness(
                 pattern_id, tool_error_count == 0
             )
 
-        # StabilityMonitor
+        # 记录本步的快照：错误率、延迟、上下文使用率
         if self.stability:
             snapshot = MetricSnapshot(
                 timestamp=time.time(),
@@ -250,7 +251,7 @@ class CyberneticOrchestrator:
             if self.context_cybernetics:
                 self.stability.feed_orchestrator(self.context_cybernetics)
 
-        # Progress controller
+        # 检测任务是否卡住
         if self.progress:
             progress_signal = ProgressSignal(
                 total_steps=max_steps,
@@ -269,7 +270,7 @@ class CyberneticOrchestrator:
                     decision.action.value, decision.health_score, decision.stall_score,
                 )
 
-        # Self-healing
+        # 检测是否需要自愈
         if self.healing:
             occ_idx = self.feedback._compute_oscillation() if self.feedback else 0.0
             self.healing.detect_and_heal({
@@ -281,10 +282,10 @@ class CyberneticOrchestrator:
                 "oscillation_index": occ_idx,
             })
 
-        # Dual-PID outer loop
+        # 双 PID 计算控制信号 ControlSignal，返回给 agent_loop.py, 由 _apply_control_signal() 应用到运行时
         if self.context_cybernetics and self.feedback:
             system_state = self.context_cybernetics.to_system_state()
-            control_signal = self.feedback.observe(system_state)
+            control_signal = self.feedback.observe(system_state) # 核心
             summary["control_signal"] = control_signal
             summary["system_state"] = system_state
 
@@ -295,7 +296,7 @@ class CyberneticOrchestrator:
                     system_state.performance_score(),
                 )
 
-        # Supervisor aggregation
+        # 聚合所有控制器快照，生成监控报告
         if self.cyber_supervisor:
             snapshots = []
             if self.context_cybernetics:
@@ -322,7 +323,7 @@ class CyberneticOrchestrator:
             except Exception:
                 pass
 
-        # AdaptivePIDTuner: periodic self-tuning
+        # 自动调节 PID 参数(kp, ki, kd)（每20步一次）
         if (
             self.adaptive_tuner
             and step > 0
@@ -342,7 +343,7 @@ class CyberneticOrchestrator:
             except Exception:
                 pass
 
-        # Background memory optimization via unified pipeline
+        # 后台记忆维护（清理、优化）
         if self.memory_pipeline:
             self.memory_pipeline.maintain()
 

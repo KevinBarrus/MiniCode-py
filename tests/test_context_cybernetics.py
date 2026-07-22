@@ -394,6 +394,18 @@ class TestCyberneticFeedbackLoop:
             loop.record(action, result, b, a)
         assert loop.detect_oscillation() is True
 
+    def test_direction_changes_exposes_raw_count(self):
+        loop = CyberneticFeedbackLoop()
+        action = ControlAction(compaction_intensity=0.5, strategy=CompactStrategy.FULL)
+        result = make_result(CompactStrategy.FULL, 500)
+        usages_before = [0.60, 0.72, 0.58, 0.71, 0.57, 0.73]
+        usages_after = [0.72, 0.58, 0.71, 0.57, 0.73, 0.59]
+        for before, after in zip(usages_before, usages_after):
+            loop.record(action, result, before, after)
+
+        assert loop.get_direction_changes() == 4
+        assert loop.detect_oscillation() is True
+
     def test_pid_adjustment_recommended_on_oscillation(self):
         loop = CyberneticFeedbackLoop()
         action = ControlAction(compaction_intensity=0.5, strategy=CompactStrategy.FULL)

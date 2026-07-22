@@ -340,3 +340,59 @@ FeedbackController._compute_oscillation() ─┤
 - `python3 -m py_compile minicode/feedback_controller.py tests/test_feedback_controller.py` — 语法检查通过。
 - 使用 `SystemState(oscillation_index=0.8)` 验证首轮输出为 `0.32`，证明外部振荡指数已被消费。
 - 当前环境没有安装 `pytest`，因此未运行 pytest 命令。
+
+## ✅ 缺陷 7 已修复：存在两个独立且语义不一致的振荡检测器
+
+### 修改的文件
+- `minicode/context_cybernetics.py:578-592` — 新增 `get_direction_changes()`，输出最近压缩使用率的原始方向变化次数；`detect_oscillation()` 改为基于该原始值进行布尔阈值判断。
+- `minicode/context_cybernetics.py:607-608` — `get_stats()` 输出统一的原始 `direction_changes`。
+- `minicode/context_cybernetics.py:861` — `to_system_state()` 将方向变化次数归一化为 `0.0-1.0` 的 `SystemState.oscillation_index`。
+- `tests/test_context_cybernetics.py:397-409` — 新增原始方向变化次数测试，并保留布尔检测兼容性测试。
+- `fix_report.md` — 记录缺陷 7 的数据流统一过程。
+
+### 数据流变化
+
+修复前：
+```text
+CyberneticFeedbackLoop.detect_oscillation()
+  └──→ bool
+          └──→ SystemState.oscillation_index = 0.0 或 1.0
+
+FeedbackController._compute_oscillation()
+  └──→ float
+          └──→ ControlSignal.oscillation_index
+
+两个检测器输出语义不同，ContextCybernetics 的原始变化量没有向上游传递。
+```
+
+修复后：
+```text
+CyberneticFeedbackLoop
+  └──→ get_direction_changes() → 原始次数
+          ├──→ detect_oscillation() → bool 阈值兼容接口
+          └──→ get_stats() → direction_changes
+                  └──→ to_system_state()
+                          └──→ 归一化 oscillation_index
+                                  └──→ FeedbackController 融合
+```
+
+### 新的数据流图
+```text
+压缩使用率序列
+  │
+  └──→ get_direction_changes()
+          └──→ direction_changes = N
+                  └──→ min(1.0, N / 10.0)
+                          └──→ SystemState.oscillation_index
+                                  ├──→ 内部误差振荡指数 60%
+                                  └──→ ContextCybernetics 振荡指数 40%
+                                          └──→ ControlSignal.oscillation_index
+```
+
+旧的 `detect_oscillation()` 仍返回布尔值，保证现有调用方兼容；统一后的原始信号由 `get_direction_changes()` 提供。
+
+### 验证方法
+- `python3 -m py_compile minicode/context_cybernetics.py minicode/feedback_controller.py tests/test_context_cybernetics.py tests/test_feedback_controller.py` — 语法检查通过。
+- 交替使用率序列验证 `get_direction_changes()` 返回原始次数 `4`。
+- 验证 `detect_oscillation()` 仍按阈值返回 `True`。
+- 当前环境没有安装 `pytest`，因此未运行 pytest 命令。

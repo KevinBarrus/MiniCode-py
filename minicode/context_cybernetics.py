@@ -575,15 +575,21 @@ class CyberneticFeedbackLoop:
 
         self._last_usage_before = usage_before
 
-    def detect_oscillation(self) -> bool:
-        if len(self._compaction_history) < 6:
-            return False
-        recent = self._compaction_history[-6:]
-        usages = [e["usage_after"] for e in recent]
-        direction_changes = sum(
-            1 for i in range(1, len(usages)) if (usages[i] - usages[i-1]) * (usages[i-1] - (usages[i-2] if i >= 2 else usages[i-1])) < 0
+    def get_direction_changes(self) -> int:
+        """Return the raw number of recent usage direction changes."""
+        if len(self._compaction_history) < 3:
+            return 0
+        usages = [entry["usage_after"] for entry in self._compaction_history[-6:]]
+        return sum(
+            1
+            for index in range(2, len(usages))
+            if (usages[index] - usages[index - 1])
+            * (usages[index - 1] - usages[index - 2])
+            < 0
         )
-        return direction_changes >= 3
+
+    def detect_oscillation(self) -> bool:
+        return self.get_direction_changes() >= 3
 
     def get_effectiveness_rate(self) -> float:
         if self._total_compactions == 0:
@@ -601,7 +607,7 @@ class CyberneticFeedbackLoop:
             "effective_compactions": self._effective_compactions,
             "effectiveness_rate": round(self.get_effectiveness_rate(), 4),
             "oscillation_detected": self.detect_oscillation(),
-            "direction_changes": self._direction_changes,
+            "direction_changes": self.get_direction_changes(),
             "history_entries": len(self._compaction_history),
         }
 
@@ -855,7 +861,7 @@ class ContextCyberneticsOrchestrator:
             token_efficiency=1.0 - max(0, (reading.usage_ratio if reading else 0) - 0.5),
             context_usage=reading.usage_ratio if reading else 0.0,
             error_frequency=getattr(self, '_last_error_rate', 0.0),
-            oscillation_index=1.0 if fb_stats.get("oscillation_detected") else 0.0,
+            oscillation_index=min(1.0, float(fb_stats.get("direction_changes", 0)) / 10.0),
             skill_effectiveness=fb_stats.get("effectiveness_rate", 0.0),
             pattern_reuse_rate=min(1.0, fb_stats.get("total_compactions", 0) / max(self._cycle_count, 1)),
             knowledge_accumulation=min(1.0, self._cycle_count / 50.0),

@@ -295,6 +295,61 @@ CODE / TEST
 - 使用真实 Mock Agent 验证初始化阶段确实调用 `set_setpoints()`。
 - 当前环境没有安装 `pytest`，因此未运行 pytest 命令。
 
+## ✅ 缺陷 9 已修复：预测建议只打日志不执行
+
+### 修改的文件
+- `minicode/cybernetic_orchestrator.py:176-230` — `step_start()` 接收当前消息列表，在高紧急度预测到上下文压缩时实际调用 `ContextCybernetics.run_cycle()`。
+- `minicode/cybernetic_orchestrator.py:216-230` — 压缩成功后通过原列表切片更新消息，并同步 `context_manager.messages`。
+- `minicode/agent_loop.py:867-874` — 将 `current_messages` 传入 `orch.step_start()`。
+- `tests/test_cybernetic_integration.py` — 增加预测性压缩执行与消息同步测试。
+- `fix_report.md` — 记录缺陷 9 的修复过程。
+
+### 数据流变化
+
+修复前：
+```text
+PredictiveController.generate_predictive_actions()
+  └──→ trigger_compaction
+          └──→ logger.info()
+                  └──→ 不执行压缩
+```
+
+修复后：
+```text
+PredictiveController.generate_predictive_actions()
+  └──→ trigger_compaction, urgency > 0.7
+          └──→ ContextCybernetics.run_cycle(messages, ...)
+                  ├──→ 压缩消息
+                  ├──→ 更新 current_messages
+                  └──→ 同步 context_manager.messages
+```
+
+### 新的数据流图
+```text
+step_start()
+  │
+  └──→ PredictiveController
+          └──→ PredictiveAction(
+                  recommended_action="trigger_compaction",
+                  urgency=0.9
+              )
+                  │
+                  └──→ context_cybernetics.run_cycle()
+                          │
+                          ├──→ compacted_messages
+                          ├──→ current_messages[:] = compacted_messages
+                          └──→ context_manager.messages = current_messages
+                                  └──→ 后续 LLM 调用使用已压缩上下文
+```
+
+如果消息列表不存在、上下文控制未启用或执行压缩失败，系统会保持原消息并记录告警，不影响主 Agent 循环。
+
+### 验证方法
+- `python3 -m py_compile minicode/cybernetic_orchestrator.py minicode/agent_loop.py tests/test_cybernetic_integration.py` — 语法检查通过。
+- 高紧急度预测测试确认 `run_cycle()` 被调用。
+- 验证压缩后的消息同步回 Agent 消息列表和 `ContextManager.messages`。
+- 当前环境没有安装 `pytest`，因此未运行 pytest 命令。
+
 ## ✅ 缺陷 8 已修复：PID 缺少 conditional integration
 
 ### 修改的文件

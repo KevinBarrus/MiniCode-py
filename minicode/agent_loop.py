@@ -870,6 +870,7 @@ def run_agent_turn(
                     tool_error_count=tool_error_count,
                     saw_tool_result=saw_tool_result,
                     actual_response_time=actual_response_time,
+                    messages=current_messages,
                 )
             elif enable_work_chain:
                 # 状态观测：通过可测量输出估计系统内部状态

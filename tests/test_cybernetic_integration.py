@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import minicode.cybernetic_supervisor as cybernetic_supervisor
@@ -14,6 +15,7 @@ from minicode.decoupling_controller import DecouplingController
 from minicode.feedback_controller import FeedbackController
 from minicode.mock_model import MockModelAdapter
 from minicode.permissions import PermissionManager
+from minicode.predictive_controller import PredictiveAction
 from minicode.self_healing_engine import FaultType, SelfHealingEngine
 from minicode.state_observer import MeasurementVector, StateObserver
 from minicode.tools import create_default_tool_registry
@@ -179,3 +181,46 @@ def test_decoupling_matrix_adjusts_pid_gains():
     assert feedback._performance_pid.kp < original_kp
     assert decoupling.apply_to_pid(None, feedback)["token_usage_to_latency"] > 0.5
     assert feedback._performance_pid.kp < original_kp
+
+
+def test_predictive_compaction_executes_and_syncs_messages():
+    """High-urgency predictive compaction updates the active message list."""
+    from minicode.cybernetic_orchestrator import CyberneticOrchestrator
+
+    messages = [{"role": "user", "content": "before"}]
+    compacted_messages = [{"role": "user", "content": "after"}]
+    result = SimpleNamespace(effective=True, tokens_freed=12)
+    predictive = MagicMock()
+    predictive.generate_predictive_actions.return_value = [
+        PredictiveAction(
+            action_type="preventive",
+            urgency=0.9,
+            metric_name="context_usage",
+            predicted_issue="context overflow",
+            recommended_action="trigger_compaction",
+            expected_benefit="free context space",
+        )
+    ]
+    context_cybernetics = MagicMock(enabled=True)
+    context_cybernetics.run_cycle.return_value = (compacted_messages, result, None)
+    context_manager = SimpleNamespace(
+        messages=messages,
+        get_stats=lambda: SimpleNamespace(usage_percentage=90.0),
+    )
+
+    orchestrator = CyberneticOrchestrator()
+    orchestrator._initialized = True
+    orchestrator.predictive = predictive
+    orchestrator.context_cybernetics = context_cybernetics
+    orchestrator.step_start(
+        context_manager=context_manager,
+        step=3,
+        tool_error_count=0,
+        saw_tool_result=False,
+        actual_response_time=0.2,
+        messages=messages,
+    )
+
+    context_cybernetics.run_cycle.assert_called_once()
+    assert messages == compacted_messages
+    assert context_manager.messages is messages

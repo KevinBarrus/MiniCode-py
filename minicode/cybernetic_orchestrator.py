@@ -180,6 +180,7 @@ class CyberneticOrchestrator:
         tool_error_count: int,
         saw_tool_result: bool,
         actual_response_time: float = 0.0,
+        messages: list[dict] | None = None,
     ) -> None:
         """Called at the start of each step (before model call)."""
         if not self._initialized:
@@ -216,6 +217,24 @@ class CyberneticOrchestrator:
                     action = actions[0]
                     if action.recommended_action == "trigger_compaction" and self.context_cybernetics:
                         logger.info("Predictive: trigger_compaction urgency=%.2f", action.urgency)
+                        if action.urgency > 0.7 and self.context_cybernetics.enabled and messages is not None:
+                            try:
+                                compacted_messages, result, _ = self.context_cybernetics.run_cycle(
+                                    messages,
+                                    error_rate=tool_error_count / max(step, 1),
+                                    avg_latency=actual_response_time,
+                                    turn_id=step,
+                                )
+                                if result and result.effective:
+                                    messages[:] = compacted_messages
+                                    if context_manager is not None:
+                                        context_manager.messages = messages
+                                    logger.info(
+                                        "Predictive: compacted context early, freed %d tokens",
+                                        result.tokens_freed,
+                                    )
+                            except Exception as exc:
+                                logger.warning("Predictive compaction failed: %s", exc)
 
     def step_end(
         self,

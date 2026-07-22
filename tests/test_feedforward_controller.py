@@ -7,6 +7,7 @@ from minicode.feedforward_controller import (
     PreemptionLevel,
     RiskAssessment,
 )
+from minicode.feedback_controller import FeedbackController
 from minicode.intent_parser import ActionType, IntentType, ParsedIntent
 
 
@@ -37,6 +38,9 @@ class TestPreemptiveConfig:
         assert cfg.max_turn_steps == 30
         assert cfg.confidence == 0.7
         assert cfg.recommended_model == "claude-sonnet-4"
+        assert cfg.stability_setpoint == 0.85
+        assert cfg.performance_setpoint == 0.75
+        assert cfg.efficiency_setpoint == 0.60
 
     def test_merge_with_defaults(self):
         a = PreemptiveConfig(token_budget=8000)
@@ -57,6 +61,31 @@ class TestFeedforwardPreconfigure:
         assert isinstance(cfg, PreemptiveConfig)
         assert cfg.confidence > 0.3
         assert cfg.max_turn_steps > 0
+
+    def test_intent_setpoints(self):
+        fc = FeedforwardController()
+        refactor = fc.preconfigure(
+            _make_intent(IntentType.REFACTOR, ActionType.UPDATE),
+            "Refactor the module",
+        )
+        search = fc.preconfigure(
+            _make_intent(IntentType.SEARCH, ActionType.READ),
+            "Find the implementation",
+        )
+
+        assert refactor.stability_setpoint == 0.90
+        assert refactor.efficiency_setpoint == 0.50
+        assert search.stability_setpoint == 0.70
+        assert search.efficiency_setpoint == 0.80
+
+    def test_feedback_controller_accepts_setpoints(self):
+        controller = FeedbackController()
+        controller.set_setpoints(0.90, 0.80, 0.50)
+
+        status = controller.get_status()
+        assert status["stability_target"] == 0.90
+        assert status["performance_target"] == 0.80
+        assert status["efficiency_target"] == 0.50
 
     def test_debug_intent(self):
         fc = FeedforwardController()

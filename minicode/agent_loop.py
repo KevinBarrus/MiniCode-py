@@ -618,6 +618,12 @@ def run_agent_turn(
             # 前馈控制预判风险
             preemptive_config = feedforward_controller.preconfigure(task.parsed_intent, task.raw_input)
             risk_assessment = feedforward_controller.assess_risks(task.parsed_intent, preemptive_config)
+            if feedback_controller:
+                feedback_controller.set_setpoints(
+                    stability=preemptive_config.stability_setpoint,
+                    performance=preemptive_config.performance_setpoint,
+                    efficiency=preemptive_config.efficiency_setpoint,
+                )
             logger.info(
                 "Feedforward control: config=%s risk=%s",
                 preemptive_config.recommended_model, risk_assessment.risk_level,

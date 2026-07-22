@@ -235,3 +235,62 @@ agent_loop.py
 - 使用 6 组强相关测量验证性能 PID 的 `kp` 被降低。
 - 重复调用验证同一耦合不会重复衰减 `kp`。
 - 使用 `CyberneticOrchestrator.step_end()` 验证解耦调整结果进入 summary。
+
+## ✅ 缺陷 5 已修复：FeedforwardController 没有调整 PID setpoint
+
+### 修改的文件
+- `minicode/feedforward_controller.py:16-37` — `PreemptiveConfig` 增加稳定性、性能和效率三个 setpoint 字段，并纳入默认配置合并。
+- `minicode/feedforward_controller.py:51-60` — 为 CODE、DEBUG、REFACTOR、SEARCH、REVIEW、TEST、DOCUMENT 和 SYSTEM 意图增加目标值映射。
+- `minicode/feedback_controller.py:192-202` — 新增 `set_setpoints()`，将前馈配置安全地写入三个外层 PID 目标值并限制在 `0.0-1.0`。
+- `minicode/agent_loop.py:615-625` — 任务初始化完成前馈配置后，将三个 setpoint 应用到实际运行中的 `FeedbackController`。
+- `tests/test_feedforward_controller.py` — 增加默认值、意图映射和反馈控制器目标值测试。
+- `tests/test_cybernetic_integration.py` — 增加真实 Agent 初始化时 setpoint 传递测试。
+
+### 数据流变化
+
+修复前：
+```text
+任务意图
+  └──→ FeedforwardController
+          └──→ token_budget / concurrency / timeout
+                  └──→ FeedbackController PID targets 固定为
+                         stability=0.85, performance=0.75, efficiency=0.60
+```
+
+修复后：
+```text
+任务意图
+  └──→ FeedforwardController.preconfigure()
+          └──→ PreemptiveConfig
+                  ├──→ token_budget / concurrency / timeout
+                  └──→ stability_setpoint /
+                      performance_setpoint /
+                      efficiency_setpoint
+                          └──→ FeedbackController.set_setpoints()
+                                  └──→ 三个 PID 使用任务类型目标值
+```
+
+### 新的数据流图
+```text
+REFACTOR / DEBUG
+  └──→ 高稳定性目标
+          └──→ stability PID setpoint = 0.90
+
+SEARCH / DOCUMENT
+  └──→ 高效率目标
+          ├──→ stability PID setpoint = 0.70
+          └──→ efficiency PID setpoint = 0.80
+
+CODE / TEST
+  └──→ 中等目标
+          ├──→ stability PID setpoint = 0.85
+          ├──→ performance PID setpoint = 0.75
+          └──→ efficiency PID setpoint = 0.60
+```
+
+### 验证方法
+- `python3 -m py_compile minicode/feedforward_controller.py minicode/feedback_controller.py minicode/agent_loop.py tests/test_feedforward_controller.py tests/test_cybernetic_integration.py` — 语法检查通过。
+- 验证 REFACTOR、SEARCH 等意图生成不同 setpoint。
+- 验证 `FeedbackController.get_status()` 返回前馈配置后的目标值。
+- 使用真实 Mock Agent 验证初始化阶段确实调用 `set_setpoints()`。
+- 当前环境没有安装 `pytest`，因此未运行 pytest 命令。

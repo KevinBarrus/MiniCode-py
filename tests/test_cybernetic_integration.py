@@ -74,6 +74,28 @@ def test_same_agent_task_has_comparable_baseline_and_cybernetic_arms(tmp_path, m
     assert cybernetic["messages"] > 0
 
 
+def test_agent_applies_feedforward_setpoints(tmp_path, monkeypatch):
+    """The Agent wiring applies intent-specific targets to the feedback PID."""
+    monkeypatch.setattr(
+        cybernetic_supervisor,
+        "SUPERVISOR_STATE_PATH",
+        tmp_path / "cybernetic_supervisor.json",
+    )
+    applied: list[tuple[float, float, float]] = []
+    original = FeedbackController.set_setpoints
+
+    def capture(self, stability, performance, efficiency):
+        applied.append((stability, performance, efficiency))
+        original(self, stability, performance, efficiency)
+
+    monkeypatch.setattr(FeedbackController, "set_setpoints", capture)
+    result = _run_same_task(tmp_path / "setpoints", enable_work_chain=True)
+
+    assert result["completed"]
+    assert applied
+    assert applied[0] == (0.85, 0.75, 0.60)
+
+
 def test_context_pressure_flows_through_real_dual_pid_chain(tmp_path):
     """Context pressure reaches the outer feedback controller."""
     compactor = ContextCompactor(

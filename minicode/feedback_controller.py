@@ -189,6 +189,17 @@ class FeedbackController:
         # Pattern tracking for positive feedback
         self._pattern_scores: dict[str, float] = {}
 
+    def set_setpoints(
+        self,
+        stability: float,
+        performance: float,
+        efficiency: float,
+    ) -> None:
+        """Set PID targets from the active task's feedforward configuration."""
+        self._stability_target = max(0.0, min(1.0, stability))
+        self._performance_target = max(0.0, min(1.0, performance))
+        self._efficiency_target = max(0.0, min(1.0, efficiency))
+
     def observe(self, state: SystemState) -> ControlSignal:
         """Observe current system state and compute control signal.
 

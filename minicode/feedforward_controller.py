@@ -27,11 +27,14 @@ class PreemptiveConfig:
     enable_backup_before_write: bool = False
     require_permission_for_all_writes: bool = False
     enable_early_termination: bool = False
+    stability_setpoint: float = 0.85
+    performance_setpoint: float = 0.75
+    efficiency_setpoint: float = 0.60
     confidence: float = 0.7
     reasoning: str = ""
     def merge_with_defaults(self, defaults: "PreemptiveConfig") -> "PreemptiveConfig":
         result = PreemptiveConfig()
-        for key in ["token_budget", "context_window_reserve", "max_concurrent_tools", "serial_tools_first", "recommended_model", "force_model_upgrade", "tool_timeout_seconds", "max_turn_steps", "preload_memory_count", "enable_backup_before_write", "require_permission_for_all_writes", "enable_early_termination", "confidence", "reasoning"]:
+        for key in ["token_budget", "context_window_reserve", "max_concurrent_tools", "serial_tools_first", "recommended_model", "force_model_upgrade", "tool_timeout_seconds", "max_turn_steps", "preload_memory_count", "enable_backup_before_write", "require_permission_for_all_writes", "enable_early_termination", "stability_setpoint", "performance_setpoint", "efficiency_setpoint", "confidence", "reasoning"]:
             setattr(result, key, getattr(self, key) if getattr(self, key) is not None else getattr(defaults, key))
         result.preload_memory_tags = self.preload_memory_tags or defaults.preload_memory_tags
         return result
@@ -49,14 +52,14 @@ class RiskAssessment:
 
 class FeedforwardController:
     _INTENT_CONFIGS: dict[IntentType, dict[str, Any]] = {
-        IntentType.CODE: {"token_budget": 6000, "max_concurrent_tools": 3, "tool_timeout_seconds": 45.0, "max_turn_steps": 40, "preload_memory_tags": ["coding-conventions", "architecture", "api-design"], "enable_backup_before_write": True, "confidence": 0.8},
-        IntentType.DEBUG: {"token_budget": 5000, "max_concurrent_tools": 4, "tool_timeout_seconds": 30.0, "max_turn_steps": 35, "preload_memory_tags": ["debugging", "error-handling", "testing"], "confidence": 0.75},
-        IntentType.REFACTOR: {"token_budget": 8000, "max_concurrent_tools": 2, "tool_timeout_seconds": 60.0, "max_turn_steps": 50, "preload_memory_tags": ["refactoring", "architecture", "coding-conventions"], "enable_backup_before_write": True, "require_permission_for_all_writes": True, "confidence": 0.7},
-        IntentType.SEARCH: {"token_budget": 3000, "max_concurrent_tools": 6, "tool_timeout_seconds": 20.0, "max_turn_steps": 15, "preload_memory_tags": ["search-patterns", "file-structure"], "confidence": 0.9},
-        IntentType.REVIEW: {"token_budget": 4000, "max_concurrent_tools": 5, "tool_timeout_seconds": 25.0, "max_turn_steps": 20, "preload_memory_tags": ["review-checklist", "coding-conventions", "security"], "confidence": 0.85},
-        IntentType.TEST: {"token_budget": 5000, "max_concurrent_tools": 4, "tool_timeout_seconds": 45.0, "max_turn_steps": 30, "preload_memory_tags": ["testing", "test-patterns", "test-frameworks"], "enable_backup_before_write": True, "confidence": 0.8},
-        IntentType.DOCUMENT: {"token_budget": 3000, "max_concurrent_tools": 5, "tool_timeout_seconds": 20.0, "max_turn_steps": 15, "preload_memory_tags": ["documentation", "api-design"], "confidence": 0.9},
-        IntentType.SYSTEM: {"token_budget": 2000, "max_concurrent_tools": 2, "tool_timeout_seconds": 15.0, "max_turn_steps": 10, "preload_memory_tags": [], "enable_early_termination": True, "confidence": 0.95},
+        IntentType.CODE: {"token_budget": 6000, "max_concurrent_tools": 3, "tool_timeout_seconds": 45.0, "max_turn_steps": 40, "preload_memory_tags": ["coding-conventions", "architecture", "api-design"], "enable_backup_before_write": True, "stability_setpoint": 0.85, "performance_setpoint": 0.75, "efficiency_setpoint": 0.60, "confidence": 0.8},
+        IntentType.DEBUG: {"token_budget": 5000, "max_concurrent_tools": 4, "tool_timeout_seconds": 30.0, "max_turn_steps": 35, "preload_memory_tags": ["debugging", "error-handling", "testing"], "stability_setpoint": 0.90, "performance_setpoint": 0.75, "efficiency_setpoint": 0.50, "confidence": 0.75},
+        IntentType.REFACTOR: {"token_budget": 8000, "max_concurrent_tools": 2, "tool_timeout_seconds": 60.0, "max_turn_steps": 50, "preload_memory_tags": ["refactoring", "architecture", "coding-conventions"], "enable_backup_before_write": True, "require_permission_for_all_writes": True, "stability_setpoint": 0.90, "performance_setpoint": 0.80, "efficiency_setpoint": 0.50, "confidence": 0.7},
+        IntentType.SEARCH: {"token_budget": 3000, "max_concurrent_tools": 6, "tool_timeout_seconds": 20.0, "max_turn_steps": 15, "preload_memory_tags": ["search-patterns", "file-structure"], "stability_setpoint": 0.70, "performance_setpoint": 0.60, "efficiency_setpoint": 0.80, "confidence": 0.9},
+        IntentType.REVIEW: {"token_budget": 4000, "max_concurrent_tools": 5, "tool_timeout_seconds": 25.0, "max_turn_steps": 20, "preload_memory_tags": ["review-checklist", "coding-conventions", "security"], "stability_setpoint": 0.85, "performance_setpoint": 0.75, "efficiency_setpoint": 0.65, "confidence": 0.85},
+        IntentType.TEST: {"token_budget": 5000, "max_concurrent_tools": 4, "tool_timeout_seconds": 45.0, "max_turn_steps": 30, "preload_memory_tags": ["testing", "test-patterns", "test-frameworks"], "enable_backup_before_write": True, "stability_setpoint": 0.85, "performance_setpoint": 0.75, "efficiency_setpoint": 0.60, "confidence": 0.8},
+        IntentType.DOCUMENT: {"token_budget": 3000, "max_concurrent_tools": 5, "tool_timeout_seconds": 20.0, "max_turn_steps": 15, "preload_memory_tags": ["documentation", "api-design"], "stability_setpoint": 0.70, "performance_setpoint": 0.60, "efficiency_setpoint": 0.80, "confidence": 0.9},
+        IntentType.SYSTEM: {"token_budget": 2000, "max_concurrent_tools": 2, "tool_timeout_seconds": 15.0, "max_turn_steps": 10, "preload_memory_tags": [], "enable_early_termination": True, "stability_setpoint": 0.90, "performance_setpoint": 0.70, "efficiency_setpoint": 0.50, "confidence": 0.95},
     }
     _COMPLEXITY_MULTIPLIERS: dict[str, dict[str, float]] = {
         "simple": {"token_budget": 0.5, "max_turn_steps": 0.5, "tool_timeout_seconds": 0.7, "max_concurrent_tools": 1.5},

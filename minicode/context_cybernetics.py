@@ -120,18 +120,23 @@ class ContextPressureSensor:
         turn_id: int = 0,
     ) -> ContextPressureReading:
         now = time.time()
-        usage_ratio = token_count / max(context_window, 1)
+        usage_ratio = token_count / max(context_window, 1) # 当前使用率
 
         dt = now - self._last_timestamp if self._last_timestamp > 0 else 1.0
         dt = max(dt, 0.001)
 
+        # 一阶导数：增长速度
         raw_growth = (token_count - self._last_token_count) / max(context_window, 1) if self._last_timestamp > 0 else 0.0
         growth_rate = raw_growth / dt if dt > 0 else 0.0
+
+        # 二阶导数：加速度
         acceleration = (growth_rate - self._last_growth_rate) / dt if dt > 0 else 0.0
 
+        # 指数平滑
         alpha = 0.3
         smoothed_growth = alpha * growth_rate + (1 - alpha) * self._last_growth_rate
 
+        # 异常检测
         anomaly = self._detect_anomaly(usage_ratio, smoothed_growth, acceleration)
 
         reading = ContextPressureReading(
@@ -162,12 +167,18 @@ class ContextPressureSensor:
             return None
         recent = self._history[-3:]
         avg_usage = sum(r.usage_ratio for r in recent) / len(recent)
+
+        # 突然飙升：当前使用率比近三次均值高 15% 且增长快
         if usage_ratio > avg_usage + 0.15 and growth_rate > 0.02:
             return AnomalyType.SUDDEN_SPIKE
+
+        # 加速增长：加速度 > 0.001 且已有正增长
         if acceleration > 0.001 and growth_rate > 0.01:
             return AnomalyType.ACCELERATING_GROWTH
         if len(self._history) >= 5:
             signs = [1 if r.growth_rate > 0 else -1 for r in self._history[-5:]]
+
+            # 振荡：growth_rate 反复变号但总使用率没变
             if len(set(signs)) >= 4 and abs(usage_ratio - self._history[-5].usage_ratio) < 0.05:
                 return AnomalyType.OSCILLATION
         return None

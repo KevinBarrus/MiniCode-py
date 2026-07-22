@@ -322,26 +322,71 @@ class SelfHealingEngine:
 
     def _execute_reduce_concurrency(self) -> dict[str, Any]:
         """Reduce concurrency to prevent resource exhaustion."""
-        if self._tool_scheduler and hasattr(self._tool_scheduler, '_controller'):
-            return {
-                "success": True,
-                "action": "Reduced concurrency to minimum for resource preservation",
-            }
-        return {"success": True, "action": "Concurrency reduction logged (no scheduler ref)"}
+        if not self._tool_scheduler:
+            return {"success": False, "action": "concurrency reduction requires scheduler support"}
+
+        self._tool_scheduler._force_max_workers = 1
+        return {
+            "success": True,
+            "action": "Reduced concurrency to one worker for resource preservation",
+        }
 
     def _execute_reduce_timeout(self) -> dict[str, Any]:
         """Halve tool timeout for fast failure on timeout faults."""
+        if not self._tool_scheduler:
+            return {"success": False, "action": "timeout reduction not supported by current scheduler"}
+
+        timeout_attr = next(
+            (
+                attr
+                for attr in (
+                    "_force_tool_timeout",
+                    "tool_timeout",
+                    "timeout",
+                    "timeout_seconds",
+                )
+                if hasattr(self._tool_scheduler, attr)
+            ),
+            None,
+        )
+        if timeout_attr is None:
+            return {"success": False, "action": "timeout reduction not supported by current scheduler"}
+
+        current_timeout = getattr(self._tool_scheduler, timeout_attr)
+        if not isinstance(current_timeout, (int, float)) or current_timeout <= 0:
+            return {"success": False, "action": "timeout reduction not supported by current scheduler"}
+
+        new_timeout = max(1.0, current_timeout / 2.0)
+        setattr(self._tool_scheduler, timeout_attr, new_timeout)
         return {
             "success": True,
-            "action": "Tool timeout halved for fast failure detection",
+            "action": f"Tool timeout reduced from {current_timeout:g}s to {new_timeout:g}s",
         }
 
     def _execute_safe_mode(self) -> dict[str, Any]:
         """Enable safe mode: serialize tool execution, reduce risk."""
-        return {
-            "success": True,
-            "action": "Safe mode engaged: serial execution, reduced risk profile",
-        }
+        if not self._tool_scheduler:
+            return {"success": False, "action": "safe mode requires scheduler support"}
+
+        self._tool_scheduler._force_max_workers = 1
+        serial_attr = next(
+            (
+                attr
+                for attr in (
+                    "_force_serial_execution",
+                    "force_serial_execution",
+                    "serial_mode",
+                )
+                if hasattr(self._tool_scheduler, attr)
+            ),
+            None,
+        )
+        if serial_attr is not None:
+            setattr(self._tool_scheduler, serial_attr, True)
+            action = "Safe mode engaged: serial execution enabled"
+        else:
+            action = "Safe mode engaged: max_workers reduced to one"
+        return {"success": True, "action": action}
 
     def _execute_model_upgrade(self) -> dict[str, Any]:
         """Boost token budget to recover from performance degradation."""
@@ -390,10 +435,24 @@ class SelfHealingEngine:
 
     def _execute_force_terminate(self) -> dict[str, Any]:
         """Force terminate stalled tool calls to resolve deadlock."""
-        return {
-            "success": True,
-            "action": "Deadlock recovery: terminate stalled tools, reset execution",
-        }
+        if not self._tool_scheduler:
+            return {"success": False, "action": "force_terminate requires scheduler interrupt support"}
+
+        for method_name in ("cancel_all", "cancel_pending", "interrupt_all", "interrupt"):
+            method = getattr(self._tool_scheduler, method_name, None)
+            if callable(method):
+                result = method()
+                if result is False:
+                    return {
+                        "success": False,
+                        "action": f"scheduler {method_name} did not terminate stalled tools",
+                    }
+                return {
+                    "success": True,
+                    "action": f"Deadlock recovery: scheduler.{method_name}() invoked",
+                }
+
+        return {"success": False, "action": "force_terminate requires scheduler interrupt support"}
 
     def register_custom_strategy(self, strategy: HealingStrategy) -> None:
         fault_type = strategy.fault_type

@@ -527,6 +527,7 @@ def run_agent_turn(
     recoverable_thinking_retry_count = 0 # thinking 中断重试
     tool_error_count = 0 # 工具执行错误累计
     step = 0 # 当前步数
+    actual_response_time = 0.0
 
     tool_scheduler = ToolScheduler(metrics_collector=metrics_collector)
 
@@ -815,7 +816,7 @@ def run_agent_turn(
             cyber_messages, cyber_result, cyber_action = context_cybernetics.run_cycle(
                 current_messages,
                 error_rate=float(tool_error_count) / max(step, 1) if step > 0 else 0.0,
-                avg_latency=step * 2.0,
+                avg_latency=actual_response_time,
                 turn_id=step,
             )
             if cyber_result and cyber_result.effective:
@@ -861,13 +862,14 @@ def run_agent_turn(
                     step=step,
                     tool_error_count=tool_error_count,
                     saw_tool_result=saw_tool_result,
+                    actual_response_time=actual_response_time,
                 )
             elif enable_work_chain:
                 # 状态观测：通过可测量输出估计系统内部状态
                 if state_observer:
                     measurement = MeasurementVector(
                         timestamp=time.time(),
-                        response_time=step * 2.0,  # 估算响应时间
+                        response_time=actual_response_time,
                         success_rate=1.0 - (tool_error_count / max(step, 1)),
                         context_length=context_manager.get_stats().total_tokens if context_manager else 0,
                         error_count=tool_error_count,
@@ -945,6 +947,7 @@ def run_agent_turn(
                 metrics_collector.start_turn(step)
 
             next_step: AgentStep
+            model_call_started_at = time.time()
             try:
                 # 2.调 LLM
                 next_step = _model_next(
@@ -993,6 +996,7 @@ def run_agent_turn(
                             "Cybernetics Reactive recovered: freed %d tokens",
                             recovery_result.tokens_freed,
                         )
+                        actual_response_time = time.time() - model_call_started_at
                         continue
                 elif context_compactor and needs_recovery:
                     recovery_result = context_compactor.reactive_recover(current_messages, error_str)
@@ -1004,6 +1008,7 @@ def run_agent_turn(
                             "Reactive Compact recovered: freed %d tokens",
                             recovery_result.tokens_freed,
                         )
+                        actual_response_time = time.time() - model_call_started_at
                         continue
 
                 # ModelSwitcher: 尝试切换到备用模型并重试
@@ -1019,6 +1024,7 @@ def run_agent_turn(
                                 "ModelSwitcher: switched to %s, retrying with new adapter",
                                 switch_result.new_model,
                             )
+                            actual_response_time = time.time() - model_call_started_at
                             continue
                     except Exception:
                         pass
@@ -1029,6 +1035,8 @@ def run_agent_turn(
                 if metrics_collector:
                     metrics_collector.end_turn(total_tokens=0)
                 return current_messages
+
+            actual_response_time = time.time() - model_call_started_at
 
             # 3.分类 LLM 响应
             if next_step.type == "assistant":
@@ -1183,7 +1191,7 @@ def run_agent_turn(
                     max_workers = tool_scheduler.get_recommended_max_workers(
                         concurrent_calls,
                         error_rate=tool_error_count / max(step, 1),
-                        avg_latency=step * 2.0,
+                        avg_latency=actual_response_time,
                         recent_failures=tool_error_count,
                     )
                     # Apply cybernetic concurrency cap if FeedbackController reduced parallelism
@@ -1353,7 +1361,7 @@ def run_agent_turn(
                     decoupling_controller.record_measurement({
                         "token_usage_to_latency": (
                             context_manager.get_stats().usage_percentage / 100.0 if context_manager else 0.0,
-                            step * 2.0 / 60.0,
+                            actual_response_time / 60.0,
                         ),
                         "context_pressure_to_errors": (
                             context_manager.get_stats().usage_percentage / 100.0 if context_manager else 0.0,
@@ -1372,6 +1380,7 @@ def run_agent_turn(
                         tool_error_count=tool_error_count,
                         saw_tool_result=saw_tool_result,
                         max_steps=max_steps,
+                        actual_response_time=actual_response_time,
                     )
                     # 应用信号到运行时
                     max_steps = _apply_control_signal(
@@ -1551,7 +1560,7 @@ def run_agent_turn(
             snapshot = MetricSnapshot(
                 timestamp=time.time(),
                 error_rate=float(tool_error_count) / max(step, 1),
-                avg_latency=step * 2.0,  # 简化估算
+                avg_latency=actual_response_time,
                 context_usage=context_manager.get_stats().usage_percentage if context_manager else 0.0,
                 active_tasks=1,
             )
@@ -1781,4 +1790,3 @@ def run_agent_turn(
                 supervisor_report.risk_level.value,
                 "; ".join(supervisor_report.recommended_actions[:3]),
             )
-

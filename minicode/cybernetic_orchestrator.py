@@ -179,6 +179,7 @@ class CyberneticOrchestrator:
         step: int,
         tool_error_count: int,
         saw_tool_result: bool,
+        actual_response_time: float = 0.0,
     ) -> None:
         """Called at the start of each step (before model call)."""
         if not self._initialized:
@@ -188,7 +189,7 @@ class CyberneticOrchestrator:
         if self.state_observer:
             measurement = MeasurementVector(
                 timestamp=time.time(),
-                response_time=step * 2.0, # 估算值
+                response_time=actual_response_time,
                 success_rate=1.0 - (tool_error_count / max(step, 1)),
                 context_length=(
                     context_manager.get_stats().total_tokens if context_manager else 0
@@ -224,6 +225,7 @@ class CyberneticOrchestrator:
         tool_error_count: int,
         saw_tool_result: bool,
         max_steps: int,
+        actual_response_time: float = 0.0,
     ) -> dict[str, Any]:
         """Called at end of step (finally block). Returns a summary dict."""
         summary: dict[str, Any] = {}
@@ -240,7 +242,7 @@ class CyberneticOrchestrator:
             snapshot = MetricSnapshot(
                 timestamp=time.time(),
                 error_rate=float(tool_error_count) / max(step, 1),
-                avg_latency=step * 2.0,
+                avg_latency=actual_response_time,
                 context_usage=(
                     context_manager.get_stats().usage_percentage
                     if context_manager else 0.0

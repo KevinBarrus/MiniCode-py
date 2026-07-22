@@ -646,9 +646,9 @@ signal.confidence = min(1.0, max(0.3, 1.0 - abs(stability_output) * 0.3))
 ```
 
 **条件链**：
-1. context_cybernetics 存在（enable_work_chain=True）
-2. feedback 存在（Orchestrator 初始化成功）
-3. control_signal.confidence > 0.6（PID 输出可信）
+1.context_cybernetics 存在（enable_work_chain=True）
+2.feedback 存在（Orchestrator 初始化成功）
+3.control_signal.confidence > 0.6（PID 输出可信）
 
 三个条件都满足，控制信号才会真正改变运行时参数。
 

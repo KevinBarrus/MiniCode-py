@@ -131,6 +131,8 @@ class PIDController:
         p = self.kp * error # 比例项：对应当前偏差
 
         # 积分项：累积偏差（消除稳态误差）
+        if error * self._state.previous_error < 0:
+            self._state.integral = 0.0
         self._state.integral += error * dt
         self._state.integral = max(-10.0, min(10.0, self._state.integral))
         i = self.ki * self._state.integral

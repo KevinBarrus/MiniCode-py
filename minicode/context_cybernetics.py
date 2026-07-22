@@ -246,6 +246,8 @@ class ContextPIDController:
 
         p_term = self.kp * error
 
+        if error * self._prev_error < 0:
+            self._integral = 0.0
         self._integral += error * dt
         self._integral = max(-self.integral_windup_limit,
                              min(self.integral_windup_limit, self._integral))

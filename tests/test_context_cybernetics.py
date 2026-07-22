@@ -153,6 +153,15 @@ class TestContextPIDController:
             pid.compute(2.0)
         assert abs(pid._integral) <= 1.0 + 0.01
 
+    def test_integral_resets_when_error_crosses_zero(self):
+        pid = ContextPIDController(kp=0.0, ki=1.0, kd=0.0, setpoint=0.70)
+        pid.compute(1.0, dt=1.0)
+        pid.compute(1.0, dt=1.0)
+
+        pid.compute(0.0, dt=1.0)
+
+        assert pid._integral == -0.70
+
     def test_reset_clears_state(self):
         pid = ContextPIDController(setpoint=0.70)
         pid.compute(0.70)

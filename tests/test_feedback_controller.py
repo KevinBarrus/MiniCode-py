@@ -116,6 +116,15 @@ class TestPIDController:
         # Output should be bounded (anti-windup built in)
         assert -1.0 <= out <= 1.0
 
+    def test_integral_resets_when_error_crosses_zero(self):
+        pid = PIDController(kp=0.0, ki=1.0, kd=0.0)
+        for _ in range(3):
+            pid.compute(setpoint=1.0, measured=0.0, dt=1.0)
+
+        pid.compute(setpoint=1.0, measured=2.0, dt=1.0)
+
+        assert pid._state.integral == -1.0
+
     def test_reset_clears_state(self):
         pid = PIDController(kp=0.0, ki=0.5, kd=0.0)
         pid.compute(setpoint=1.0, measured=0.0, dt=1.0)

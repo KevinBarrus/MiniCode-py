@@ -295,6 +295,54 @@ CODE / TEST
 - 使用真实 Mock Agent 验证初始化阶段确实调用 `set_setpoints()`。
 - 当前环境没有安装 `pytest`，因此未运行 pytest 命令。
 
+## ✅ 缺陷 8 已修复：PID 缺少 conditional integration
+
+### 修改的文件
+- `minicode/feedback_controller.py:133-138` — 外层 `PIDController` 在误差方向穿越 0 时清零积分项，再累积当前误差。
+- `minicode/context_cybernetics.py:249-253` — `ContextPIDController` 使用相同的条件积分逻辑。
+- `tests/test_feedback_controller.py:119-127` — 增加外层 PID 误差反转测试。
+- `tests/test_context_cybernetics.py:157-167` — 增加上下文 PID 误差反转测试。
+- `fix_report.md` — 记录缺陷 8 的修改与验证结果。
+
+### 数据流变化
+
+修复前：
+```text
+PID.compute()
+  └──→ error * dt 累积到 integral
+          └──→ 即使误差穿越 0，旧方向积分仍然保留
+                  └──→ 输出短暂滞后或过冲
+```
+
+修复后：
+```text
+PID.compute()
+  ├──→ 计算当前 error
+  ├──→ 检查 error * previous_error < 0
+  │      └──→ 清零 integral
+  ├──→ 累积当前方向误差
+  └──→ clamp anti-windup → PID output
+```
+
+### 新的数据流图
+```text
+历史误差 ───────┐
+                ▼
+当前误差 ───→ 方向穿越检测
+                │
+                ├── 未穿越 0 → 继续累积积分
+                │
+                └── 穿越 0 → 清零旧积分
+                                └──→ 累积新方向误差
+                                        └──→ P + I + D
+```
+
+### 验证方法
+- `python3 -m py_compile minicode/feedback_controller.py minicode/context_cybernetics.py tests/test_feedback_controller.py tests/test_context_cybernetics.py` — 语法检查通过。
+- 外层 PID 从正误差切换到负误差后，积分项正确重置为当前负方向误差。
+- Context PID 从正误差切换到负误差后，积分项正确重置为当前负方向误差。
+- 当前环境没有安装 `pytest`，因此未运行 pytest 命令。
+
 ## ✅ 缺陷 6 已修复：`SystemState.oscillation_index` 是死数据
 
 ### 修改的文件

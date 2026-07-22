@@ -557,6 +557,10 @@ def run_agent_turn(
     reflection_engine: Any = None
     model_switcher: Any = None
     memory_injector: Any = None
+    context_compactor: ContextCompactor | None = None
+    context_cybernetics: ContextCyberneticsOrchestrator | None = None
+    memory_mgr: MemoryManager | None = None
+    cost_control: CostControlLoop | None = None
 
     if enable_work_chain:
         # 解析用户意图
@@ -657,9 +661,6 @@ def run_agent_turn(
 
         # 初始化上下文管理器 (Claude Code-style + Engineering Cybernetics)
         # 必须在 SelfHealingEngine 之前初始化，因为自愈引擎需要委托压缩操作
-        context_compactor: ContextCompactor | None = None
-        context_cybernetics: ContextCyberneticsOrchestrator | None = None
-        memory_mgr: MemoryManager | None = None
         if context_manager:
             compact_config = AutoCompactConfig(
                 threshold_ratio=0.85,

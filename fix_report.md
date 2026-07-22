@@ -123,3 +123,60 @@ SelfHealingEngine.detect_and_heal(metrics)
 - 使用真实 `ToolScheduler` 验证并发降为 1、安全模式生效、无超时/取消接口时诚实失败。
 - 使用带超时字段和 `cancel_all()` 的最小 scheduler 验证超时减半和取消调用均生效。
 - 尝试运行 `pytest -q tests/test_advanced_cybernetics.py -k 'SelfHealingEngine'`，但当前环境没有安装 `pytest`。
+
+## ✅ 缺陷 3 已修复：缺少真实 Agent A/B 对比评测
+
+### 修改的文件
+- `minicode/agent_loop.py:560-563` — 将上下文压缩器、ContextCybernetics、MemoryManager 和 CostControl 的局部变量提前初始化为 `None`，使 `enable_work_chain=False` 的基线路径可以正常运行。
+- `tests/test_cybernetic_integration.py:1-139` — 新增真实 Agent 集成测试，使用 Mock LLM 和真实工具注册表。
+
+### 数据流变化
+
+修复前：
+```text
+enable_work_chain=False
+  └──→ run_agent_turn()
+          └──→ 访问未初始化的 context_cybernetics/context_compactor
+                  └──→ A/B 基线无法完成
+```
+
+修复后：
+```text
+同一任务 + 同一 Mock LLM
+  ├── enable_work_chain=False
+  │      └──→ Agent 基线执行
+  │             └──→ 任务结果、步数、工具错误数
+  │
+  └── enable_work_chain=True
+         └──→ Agent + CyberneticOrchestrator 执行
+                └──→ 任务结果、步数、工具错误数
+                       └──→ A/B 可比较数据
+```
+
+### 新的数据流图
+```text
+Mock LLM
+  │
+  ├──→ baseline: enable_work_chain=False
+  │      └──→ ToolRegistry → ToolScheduler → result.txt
+  │
+  └──→ cybernetic: enable_work_chain=True
+         └──→ Orchestrator
+                ├──→ ContextCybernetics
+                ├──→ FeedbackController
+                ├──→ SelfHealingEngine
+                └──→ ToolRegistry → ToolScheduler → result.txt
+                         │
+                         └──→ 对比 steps/tool_errors/messages/completed
+```
+
+### 集成覆盖
+- 同一写文件任务的 baseline/cybernetic 双臂执行与结果对比。
+- 上下文压力 → ContextCybernetics → SystemState → FeedbackController 链路。
+- StateObserver 接收错误爆发数据，并触发 SelfHealingEngine 的资源故障策略。
+
+### 验证方法
+- `python3 -m py_compile minicode/agent_loop.py tests/test_cybernetic_integration.py` — 语法检查通过。
+- 使用临时工作区执行两臂 Mock LLM A/B 测试，结果均完成、各执行 1 步且工具错误数为 0。
+- 上下文压力和错误爆发集成检查通过。
+- 当前环境没有安装 `pytest`，因此未能通过 pytest 命令运行测试文件。

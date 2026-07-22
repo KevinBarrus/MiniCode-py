@@ -295,6 +295,59 @@ CODE / TEST
 - 使用真实 Mock Agent 验证初始化阶段确实调用 `set_setpoints()`。
 - 当前环境没有安装 `pytest`，因此未运行 pytest 命令。
 
+## ✅ 缺陷 10 已修复：控制论集成测试缺失
+
+### 修改的文件
+- `tests/test_cybernetic_integration.py:1-265` — 完整建立控制论集成测试文件，覆盖 Mock LLM Agent、A/B 对比、上下文压力、错误爆发、解耦、预测压缩、前馈 setpoint 和振荡故障链路。
+- `fix_report.md` — 记录缺陷 10 的集成测试补齐情况。
+
+### 数据流变化
+
+修复前：
+```text
+控制器单元测试
+  ├──→ 各模块独立验证
+  └──→ 缺少跨模块 Agent 执行链路验证
+```
+
+修复后：
+```text
+Mock LLM + ToolRegistry + Agent Loop
+  ├──→ baseline/cybernetic A/B
+  ├──→ ContextCybernetics → FeedbackController
+  ├──→ StateObserver → SelfHealingEngine
+  ├──→ DecouplingController → PID
+  ├──→ PredictiveController → ContextCompaction
+  └──→ Oscillation feedback → outer ControlSignal
+```
+
+### 新的数据流图
+```text
+真实 Agent 集成测试
+  │
+  ├── 正常任务
+  │     └──→ Mock LLM → ToolRegistry → Agent result
+  │
+  ├── A/B 对比
+  │     └──→ enable_work_chain=False / True
+  │             └──→ completion / steps / tool_errors
+  │
+  ├── 故障场景
+  │     ├──→ 上下文压力 → Context PID → Feedback PID
+  │     ├──→ 错误爆发 → StateObserver → SelfHealingEngine
+  │     └──→ 振荡序列 → SystemState → ControlSignal
+  │
+  └── 预测与解耦
+        ├──→ predictive compaction → message synchronization
+        └──→ coupling matrix → PID gain adjustment
+```
+
+### 验证方法
+- `wc -l tests/test_cybernetic_integration.py` — 集成测试文件已存在并包含 7 个测试场景。
+- `python3 -m py_compile tests/test_cybernetic_integration.py` — 语法检查通过。
+- 已手动执行振荡故障集成场景，确认 `SystemState.oscillation_index=0.4` 且外层控制信号收到振荡数据。
+- 当前环境没有安装 `pytest`，因此未运行 pytest 命令。
+
 ## ✅ 缺陷 9 已修复：预测建议只打日志不执行
 
 ### 修改的文件

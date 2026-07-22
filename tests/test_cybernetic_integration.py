@@ -9,7 +9,8 @@ import minicode.cybernetic_supervisor as cybernetic_supervisor
 from minicode.agent_loop import run_agent_turn
 from minicode.agent_intelligence import ToolScheduler
 from minicode.context_compactor import AutoCompactConfig, ContextCompactor
-from minicode.context_cybernetics import ContextCyberneticsOrchestrator
+from minicode.context_compactor import CompactStrategy, CompactTrigger, CompactionResult
+from minicode.context_cybernetics import ContextCyberneticsOrchestrator, ControlAction
 from minicode.context_manager import ContextManager
 from minicode.decoupling_controller import DecouplingController
 from minicode.feedback_controller import FeedbackController
@@ -224,3 +225,41 @@ def test_predictive_compaction_executes_and_syncs_messages():
     context_cybernetics.run_cycle.assert_called_once()
     assert messages == compacted_messages
     assert context_manager.messages is messages
+
+
+def test_oscillation_fault_flows_to_outer_feedback(tmp_path):
+    """Alternating compaction outcomes reach the outer feedback signal."""
+    compactor = ContextCompactor(
+        context_window=1000,
+        workspace=str(tmp_path),
+        memory_manager=MagicMock(),
+        estimate_fn=lambda message: len(message.get("content", "")),
+        config=AutoCompactConfig(),
+    )
+    context_orchestrator = ContextCyberneticsOrchestrator(
+        compactor,
+        enabled=True,
+    )
+    context_orchestrator.run_cycle(
+        [{"role": "user", "content": "x" * 100}],
+        turn_id=1,
+    )
+    action = ControlAction(compaction_intensity=0.5, strategy=CompactStrategy.FULL)
+    result = CompactionResult(
+        success=True,
+        strategy=CompactStrategy.FULL,
+        trigger=CompactTrigger.MICROCOMPACT_CACHED,
+        messages=[],
+        tokens_freed=100,
+    )
+    for before, after in zip(
+        [0.60, 0.72, 0.58, 0.71, 0.57, 0.73],
+        [0.72, 0.58, 0.71, 0.57, 0.73, 0.59],
+    ):
+        context_orchestrator.feedback.record(action, result, before, after)
+
+    state = context_orchestrator.to_system_state()
+    signal = FeedbackController().observe(state)
+
+    assert state.oscillation_index == 0.4
+    assert signal.oscillation_index > 0.0

@@ -274,9 +274,10 @@ class FeedbackController:
         if len(self._error_history) > self._max_history:
             self._error_history.pop(0)
 
-        # Compute oscillation index
-        if len(self._error_history) >= 4:
-            signal.oscillation_index = self._compute_oscillation()
+        # Fuse internal error oscillation with the upstream system signal.
+        internal_oscillation = self._compute_oscillation()
+        external_oscillation = max(0.0, min(1.0, state.oscillation_index))
+        signal.oscillation_index = internal_oscillation * 0.6 + external_oscillation * 0.4
 
         # Store state for next iteration
         self._previous_state = state

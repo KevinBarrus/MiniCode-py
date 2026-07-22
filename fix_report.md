@@ -294,3 +294,49 @@ CODE / TEST
 - 验证 `FeedbackController.get_status()` 返回前馈配置后的目标值。
 - 使用真实 Mock Agent 验证初始化阶段确实调用 `set_setpoints()`。
 - 当前环境没有安装 `pytest`，因此未运行 pytest 命令。
+
+## ✅ 缺陷 6 已修复：`SystemState.oscillation_index` 是死数据
+
+### 修改的文件
+- `minicode/feedback_controller.py:277-280` — `FeedbackController.observe()` 读取并限制 `state.oscillation_index`，与内部振荡指数融合后写入 `ControlSignal.oscillation_index`。
+- `tests/test_feedback_controller.py:158-164` — 新增外部振荡指数被消费的测试。
+- `fix_report.md` — 记录本次振荡数据闭环。
+
+### 数据流变化
+
+修复前：
+```text
+ContextCybernetics.to_system_state()
+  └──→ SystemState.oscillation_index
+          └──→ FeedbackController.observe() 不读取
+                  └──→ ControlSignal 只使用内部振荡历史
+```
+
+修复后：
+```text
+ContextCybernetics.to_system_state()
+  └──→ SystemState.oscillation_index
+          └──→ FeedbackController.observe()
+                  └──→ 内部振荡指数 60% + 外部振荡指数 40%
+                          └──→ ControlSignal.oscillation_index
+```
+
+### 新的数据流图
+```text
+ContextCybernetics
+  └──→ SystemState.oscillation_index ───────┐
+                                            │ 40%
+FeedbackController._compute_oscillation() ─┤
+                                            │ 60%
+                                            ▼
+                              ControlSignal.oscillation_index
+                                            │
+                                            └──→ 下游自愈/控制逻辑
+```
+
+外部指数会先限制在 `0.0-1.0`，避免异常状态值污染控制信号。本次只解决缺陷 6 的死数据问题，未修改缺陷 7 的两个检测器统一逻辑。
+
+### 验证方法
+- `python3 -m py_compile minicode/feedback_controller.py tests/test_feedback_controller.py` — 语法检查通过。
+- 使用 `SystemState(oscillation_index=0.8)` 验证首轮输出为 `0.32`，证明外部振荡指数已被消费。
+- 当前环境没有安装 `pytest`，因此未运行 pytest 命令。

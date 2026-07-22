@@ -155,6 +155,12 @@ class TestFeedbackControllerObserve:
         # High error + low stability should trigger force_compaction
         assert signal.confidence > 0.3
 
+    def test_consumes_external_oscillation_index(self):
+        fc = FeedbackController()
+        signal = fc.observe(SystemState(oscillation_index=0.8))
+
+        assert abs(signal.oscillation_index - 0.32) < 1e-9
+
     def test_oscillation_index_populated(self):
         fc = FeedbackController()
         for i in range(6):

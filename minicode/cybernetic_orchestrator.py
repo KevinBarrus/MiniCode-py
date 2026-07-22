@@ -298,6 +298,16 @@ class CyberneticOrchestrator:
                     system_state.performance_score(),
                 )
 
+        if self.decoupling:
+            context_pid = self.context_cybernetics.pid if self.context_cybernetics else None
+            decoupling_adjustments = self.decoupling.apply_to_pid(context_pid, self.feedback)
+            if decoupling_adjustments:
+                summary["decoupling_adjustments"] = decoupling_adjustments
+                logger.info(
+                    "DecouplingController: applied %d PID coupling adjustments",
+                    len(decoupling_adjustments),
+                )
+
         # 聚合所有控制器快照，生成监控报告
         if self.cyber_supervisor:
             snapshots = []

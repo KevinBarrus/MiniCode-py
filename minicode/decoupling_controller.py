@@ -152,6 +152,7 @@ class DecouplingController:
         self._max_history = 50
 
         self._coupling_compensation: dict[str, float] = {}
+        self._applied_pid_couplings: dict[str, float] = {}
 
         self._init_coupling_pairs()
 
@@ -189,6 +190,37 @@ class DecouplingController:
             self._decoupling_matrix[var_b][var_a] = coupling_strength
 
         return self._decoupling_matrix
+
+    def apply_to_pid(self, context_pid: Any | None, feedback_controller: Any | None) -> dict[str, float]:
+        """Apply strong coupling compensation to the active PID controllers."""
+        matrix = self.compute_decoupling_matrix()
+        adjustments: dict[str, float] = {}
+        pid_targets = {
+            "token_usage_to_latency": getattr(feedback_controller, "_performance_pid", None),
+            "concurrency_to_stability": getattr(feedback_controller, "_stability_pid", None),
+            "model_level_to_cost": getattr(feedback_controller, "_efficiency_pid", None),
+            "skill_complexity_to_timeout": getattr(feedback_controller, "_stability_pid", None),
+        }
+
+        for source, targets in matrix.items():
+            for target, coupling in targets.items():
+                if coupling <= 0.5:
+                    continue
+
+                pair_key = f"{source}_to_{target}"
+                reverse_key = f"{target}_to_{source}"
+                if reverse_key in adjustments:
+                    continue
+
+                adjustments[pair_key] = coupling
+                pid = context_pid if pair_key == "context_pressure_to_errors" else pid_targets.get(pair_key)
+                if pid is None or pair_key in self._applied_pid_couplings:
+                    continue
+
+                pid.kp *= 1.0 - coupling * 0.5
+                self._applied_pid_couplings[pair_key] = coupling
+
+        return adjustments
 
     def decouple_command(self, variable_name: str, raw_command: float,
                          other_variables: dict[str, float]) -> DecoupledCommand:
@@ -270,3 +302,4 @@ class DecouplingController:
         self._decoupling_matrix = {}
         self._command_history = []
         self._coupling_compensation = {}
+        self._applied_pid_couplings = {}

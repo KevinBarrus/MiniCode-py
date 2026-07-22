@@ -10,6 +10,7 @@ from minicode.agent_intelligence import ToolScheduler
 from minicode.context_compactor import AutoCompactConfig, ContextCompactor
 from minicode.context_cybernetics import ContextCyberneticsOrchestrator
 from minicode.context_manager import ContextManager
+from minicode.decoupling_controller import DecouplingController
 from minicode.feedback_controller import FeedbackController
 from minicode.mock_model import MockModelAdapter
 from minicode.permissions import PermissionManager
@@ -137,3 +138,22 @@ def test_fault_signals_reach_state_observer_and_self_healing():
     assert actions
     assert any(action.fault_type == FaultType.RESOURCE_EXHAUSTION for action in actions)
     assert scheduler._force_max_workers == 1
+
+
+def test_decoupling_matrix_adjusts_pid_gains():
+    """Strong measured coupling is applied to the corresponding PID."""
+    decoupling = DecouplingController()
+    feedback = FeedbackController()
+    original_kp = feedback._performance_pid.kp
+
+    for value in range(1, 7):
+        decoupling.record_measurement({
+            "token_usage_to_latency": (float(value), float(value * 2)),
+        })
+
+    adjustments = decoupling.apply_to_pid(None, feedback)
+
+    assert adjustments["token_usage_to_latency"] > 0.5
+    assert feedback._performance_pid.kp < original_kp
+    assert decoupling.apply_to_pid(None, feedback)["token_usage_to_latency"] > 0.5
+    assert feedback._performance_pid.kp < original_kp

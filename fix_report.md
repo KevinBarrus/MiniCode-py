@@ -180,3 +180,58 @@ Mock LLM
 - 使用临时工作区执行两臂 Mock LLM A/B 测试，结果均完成、各执行 1 步且工具错误数为 0。
 - 上下文压力和错误爆发集成检查通过。
 - 当前环境没有安装 `pytest`，因此未能通过 pytest 命令运行测试文件。
+
+## ✅ 缺陷 4 已修复：解耦矩阵没有被 PID 消费
+
+### 修改的文件
+- `minicode/decoupling_controller.py:148-155` — 增加已应用耦合记录，避免同一耦合在每个 step 重复衰减 PID 增益。
+- `minicode/decoupling_controller.py:194-223` — 新增 `apply_to_pid()`，将强耦合关系映射到 Context PID、性能 PID、稳定性 PID 和效率 PID，并降低对应 `kp`。
+- `minicode/decoupling_controller.py:278-279` — reset 时清理已应用的 PID 耦合记录。
+- `minicode/cybernetic_orchestrator.py:301-309` — 在 `step_end()` 中调用解耦补偿，并将调整结果放入 step summary。
+- `tests/test_cybernetic_integration.py:143-159` — 新增强耦合到 PID 增益调整的集成检查。
+
+### 数据流变化
+
+修复前：
+```text
+agent_loop.py
+  └──→ record_measurement()
+          └──→ compute_decoupling_matrix()
+                  └──→ 结果仅用于状态/日志
+                         └──→ PID 参数不变
+```
+
+修复后：
+```text
+agent_loop.py
+  └──→ record_measurement()
+          └──→ CyberneticOrchestrator.step_end()
+                  └──→ apply_to_pid()
+                          ├──→ Context PID.kp
+                          ├──→ Performance PID.kp
+                          ├──→ Stability PID.kp
+                          └──→ Efficiency PID.kp
+```
+
+### 新的数据流图
+```text
+变量测量
+  │
+  └──→ CouplingAnalyzer
+          └──→ compute_decoupling_matrix()
+                  │
+                  └──→ apply_to_pid(context_pid, feedback_controller)
+                          │
+                          ├── coupling > 0.5
+                          │      └──→ kp *= (1 - coupling * 0.5)
+                          │
+                          └──→ step_summary["decoupling_adjustments"]
+```
+
+相同耦合关系只在首次应用时调整一次，避免每个 step 重复降低 `kp` 造成控制器失稳。
+
+### 验证方法
+- `python3 -m py_compile minicode/decoupling_controller.py minicode/cybernetic_orchestrator.py tests/test_cybernetic_integration.py` — 语法检查通过。
+- 使用 6 组强相关测量验证性能 PID 的 `kp` 被降低。
+- 重复调用验证同一耦合不会重复衰减 `kp`。
+- 使用 `CyberneticOrchestrator.step_end()` 验证解耦调整结果进入 summary。

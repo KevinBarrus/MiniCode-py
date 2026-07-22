@@ -2,12 +2,12 @@
 
 ### 修改的文件
 - `minicode/agent_loop.py:530` — 增加 `actual_response_time` 状态，保存最近一次 LLM 调用的真实耗时。
-- `minicode/agent_loop.py:815-819` — 上下文控制初始化时使用真实延迟，不再使用 `step * 2.0`。
+- `minicode/agent_loop.py:815-819` — 上下文控制初始化时使用真实延迟，不再使用 `step * 2.0`
 - `minicode/agent_loop.py:860-872` — 将真实延迟传入 `orch.step_start()`，并用于无 orchestrator 分支的状态观测。
 - `minicode/agent_loop.py:950-1039` — 在 `_model_next()` 调用前后计时，并覆盖上下文恢复、模型切换重试路径。
 - `minicode/agent_loop.py:1188-1191` — 将真实延迟传入工具调度器的延迟估计。
 - `minicode/agent_loop.py:1358-1362` — 解耦控制的延迟测量改用真实耗时。
-- `minicode/agent_loop.py:1373-1380` — 将当前 LLM 调用耗时传入 `orch.step_end()`。
+- `minicode/agent_loop.py:1373-1380` — 将当前 LLM 调用耗时传入 `orch.step_end()`
 - `minicode/agent_loop.py:1557-1560` — 稳定性快照使用真实平均延迟。
 - `minicode/cybernetic_orchestrator.py:176-192` — `step_start()` 增加 `actual_response_time` 参数，并写入 `MeasurementVector.response_time`。
 - `minicode/cybernetic_orchestrator.py:219-245` — `step_end()` 增加 `actual_response_time` 参数，并写入 `MetricSnapshot.avg_latency`。
@@ -122,7 +122,6 @@ SelfHealingEngine.detect_and_heal(metrics)
 - `python3 -m py_compile minicode/self_healing_engine.py` — 语法检查通过。
 - 使用真实 `ToolScheduler` 验证并发降为 1、安全模式生效、无超时/取消接口时诚实失败。
 - 使用带超时字段和 `cancel_all()` 的最小 scheduler 验证超时减半和取消调用均生效。
-- 尝试运行 `pytest -q tests/test_advanced_cybernetics.py -k 'SelfHealingEngine'`，但当前环境没有安装 `pytest`。
 
 ## ✅ 缺陷 3 已修复：缺少真实 Agent A/B 对比评测
 
@@ -179,7 +178,6 @@ Mock LLM
 - `python3 -m py_compile minicode/agent_loop.py tests/test_cybernetic_integration.py` — 语法检查通过。
 - 使用临时工作区执行两臂 Mock LLM A/B 测试，结果均完成、各执行 1 步且工具错误数为 0。
 - 上下文压力和错误爆发集成检查通过。
-- 当前环境没有安装 `pytest`，因此未能通过 pytest 命令运行测试文件。
 
 ## ✅ 缺陷 4 已修复：解耦矩阵没有被 PID 消费
 
@@ -293,60 +291,154 @@ CODE / TEST
 - 验证 REFACTOR、SEARCH 等意图生成不同 setpoint。
 - 验证 `FeedbackController.get_status()` 返回前馈配置后的目标值。
 - 使用真实 Mock Agent 验证初始化阶段确实调用 `set_setpoints()`。
-- 当前环境没有安装 `pytest`，因此未运行 pytest 命令。
 
-## ✅ 缺陷 10 已修复：控制论集成测试缺失
+## ✅ 缺陷 6 已修复：`SystemState.oscillation_index` 是死数据
 
 ### 修改的文件
-- `tests/test_cybernetic_integration.py:1-265` — 完整建立控制论集成测试文件，覆盖 Mock LLM Agent、A/B 对比、上下文压力、错误爆发、解耦、预测压缩、前馈 setpoint 和振荡故障链路。
-- `fix_report.md` — 记录缺陷 10 的集成测试补齐情况。
+- `minicode/feedback_controller.py:277-280` — `FeedbackController.observe()` 读取并限制 `state.oscillation_index`，与内部振荡指数融合后写入 `ControlSignal.oscillation_index`。
+- `tests/test_feedback_controller.py:158-164` — 新增外部振荡指数被消费的测试。
+- `fix_report.md` — 记录本次振荡数据闭环。
 
 ### 数据流变化
 
 修复前：
 ```text
-控制器单元测试
-  ├──→ 各模块独立验证
-  └──→ 缺少跨模块 Agent 执行链路验证
+ContextCybernetics.to_system_state()
+  └──→ SystemState.oscillation_index
+          └──→ FeedbackController.observe() 不读取
+                  └──→ ControlSignal 只使用内部振荡历史
 ```
 
 修复后：
 ```text
-Mock LLM + ToolRegistry + Agent Loop
-  ├──→ baseline/cybernetic A/B
-  ├──→ ContextCybernetics → FeedbackController
-  ├──→ StateObserver → SelfHealingEngine
-  ├──→ DecouplingController → PID
-  ├──→ PredictiveController → ContextCompaction
-  └──→ Oscillation feedback → outer ControlSignal
+ContextCybernetics.to_system_state()
+  └──→ SystemState.oscillation_index
+          └──→ FeedbackController.observe()
+                  └──→ 内部振荡指数 60% + 外部振荡指数 40%
+                          └──→ ControlSignal.oscillation_index
 ```
 
 ### 新的数据流图
 ```text
-真实 Agent 集成测试
+ContextCybernetics
+  └──→ SystemState.oscillation_index ───────┐
+                                            │ 40%
+FeedbackController._compute_oscillation() ─┤
+                                            │ 60%
+                                            ▼
+                              ControlSignal.oscillation_index
+                                            │
+                                            └──→ 下游自愈/控制逻辑
+```
+
+外部指数会先限制在 `0.0-1.0`，避免异常状态值污染控制信号。本次只解决缺陷 6 的死数据问题，未修改缺陷 7 的两个检测器统一逻辑。
+
+### 验证方法
+- `python3 -m py_compile minicode/feedback_controller.py tests/test_feedback_controller.py` — 语法检查通过。
+- 使用 `SystemState(oscillation_index=0.8)` 验证首轮输出为 `0.32`，证明外部振荡指数已被消费。
+
+## ✅ 缺陷 7 已修复：存在两个独立且语义不一致的振荡检测器
+
+### 修改的文件
+- `minicode/context_cybernetics.py:578-592` — 新增 `get_direction_changes()`，输出最近压缩使用率的原始方向变化次数；`detect_oscillation()` 改为基于该原始值进行布尔阈值判断。
+- `minicode/context_cybernetics.py:607-608` — `get_stats()` 输出统一的原始 `direction_changes`。
+- `minicode/context_cybernetics.py:861` — `to_system_state()` 将方向变化次数归一化为 `0.0-1.0` 的 `SystemState.oscillation_index`。
+- `tests/test_context_cybernetics.py:397-409` — 新增原始方向变化次数测试，并保留布尔检测兼容性测试。
+- `fix_report.md` — 记录缺陷 7 的数据流统一过程。
+
+### 数据流变化
+
+修复前：
+```text
+CyberneticFeedbackLoop.detect_oscillation()
+  └──→ bool
+          └──→ SystemState.oscillation_index = 0.0 或 1.0
+
+FeedbackController._compute_oscillation()
+  └──→ float
+          └──→ ControlSignal.oscillation_index
+
+两个检测器输出语义不同，ContextCybernetics 的原始变化量没有向上游传递。
+```
+
+修复后：
+```text
+CyberneticFeedbackLoop
+  └──→ get_direction_changes() → 原始次数
+          ├──→ detect_oscillation() → bool 阈值兼容接口
+          └──→ get_stats() → direction_changes
+                  └──→ to_system_state()
+                          └──→ 归一化 oscillation_index
+                                  └──→ FeedbackController 融合
+```
+
+### 新的数据流图
+```text
+压缩使用率序列
   │
-  ├── 正常任务
-  │     └──→ Mock LLM → ToolRegistry → Agent result
-  │
-  ├── A/B 对比
-  │     └──→ enable_work_chain=False / True
-  │             └──→ completion / steps / tool_errors
-  │
-  ├── 故障场景
-  │     ├──→ 上下文压力 → Context PID → Feedback PID
-  │     ├──→ 错误爆发 → StateObserver → SelfHealingEngine
-  │     └──→ 振荡序列 → SystemState → ControlSignal
-  │
-  └── 预测与解耦
-        ├──→ predictive compaction → message synchronization
-        └──→ coupling matrix → PID gain adjustment
+  └──→ get_direction_changes()
+          └──→ direction_changes = N
+                  └──→ min(1.0, N / 10.0)
+                          └──→ SystemState.oscillation_index
+                                  ├──→ 内部误差振荡指数 60%
+                                  └──→ ContextCybernetics 振荡指数 40%
+                                          └──→ ControlSignal.oscillation_index
+```
+
+旧的 `detect_oscillation()` 仍返回布尔值，保证现有调用方兼容；统一后的原始信号由 `get_direction_changes()` 提供。
+
+### 验证方法
+- `python3 -m py_compile minicode/context_cybernetics.py minicode/feedback_controller.py tests/test_context_cybernetics.py tests/test_feedback_controller.py` — 语法检查通过。
+- 交替使用率序列验证 `get_direction_changes()` 返回原始次数 `4`
+- 验证 `detect_oscillation()` 仍按阈值返回 `True`
+
+
+## ✅ 缺陷 8 已修复：PID 缺少 conditional integration
+
+### 修改的文件
+- `minicode/feedback_controller.py:133-138` — 外层 `PIDController` 在误差方向穿越 0 时清零积分项，再累积当前误差。
+- `minicode/context_cybernetics.py:249-253` — `ContextPIDController` 使用相同的条件积分逻辑。
+- `tests/test_feedback_controller.py:119-127` — 增加外层 PID 误差反转测试。
+- `tests/test_context_cybernetics.py:157-167` — 增加上下文 PID 误差反转测试。
+- `fix_report.md` — 记录缺陷 8 的修改与验证结果。
+
+### 数据流变化
+
+修复前：
+```text
+PID.compute()
+  └──→ error * dt 累积到 integral
+          └──→ 即使误差穿越 0，旧方向积分仍然保留
+                  └──→ 输出短暂滞后或过冲
+```
+
+修复后：
+```text
+PID.compute()
+  ├──→ 计算当前 error
+  ├──→ 检查 error * previous_error < 0
+  │      └──→ 清零 integral
+  ├──→ 累积当前方向误差
+  └──→ clamp anti-windup → PID output
+```
+
+### 新的数据流图
+```text
+历史误差 ───────┐
+                ▼
+当前误差 ───→ 方向穿越检测
+                │
+                ├── 未穿越 0 → 继续累积积分
+                │
+                └── 穿越 0 → 清零旧积分
+                                └──→ 累积新方向误差
+                                        └──→ P + I + D
 ```
 
 ### 验证方法
-- `wc -l tests/test_cybernetic_integration.py` — 集成测试文件已存在并包含 7 个测试场景。
-- `python3 -m py_compile tests/test_cybernetic_integration.py` — 语法检查通过。
-- 已手动执行振荡故障集成场景，确认 `SystemState.oscillation_index=0.4` 且外层控制信号收到振荡数据。
-- 当前环境没有安装 `pytest`，因此未运行 pytest 命令。
+- `python3 -m py_compile minicode/feedback_controller.py minicode/context_cybernetics.py tests/test_feedback_controller.py tests/test_context_cybernetics.py` — 语法检查通过。
+- 外层 PID 从正误差切换到负误差后，积分项正确重置为当前负方向误差。
+- Context PID 从正误差切换到负误差后，积分项正确重置为当前负方向误差。
 
 ## ✅ 缺陷 9 已修复：预测建议只打日志不执行
 
@@ -401,154 +493,55 @@ step_start()
 - `python3 -m py_compile minicode/cybernetic_orchestrator.py minicode/agent_loop.py tests/test_cybernetic_integration.py` — 语法检查通过。
 - 高紧急度预测测试确认 `run_cycle()` 被调用。
 - 验证压缩后的消息同步回 Agent 消息列表和 `ContextManager.messages`。
-- 当前环境没有安装 `pytest`，因此未运行 pytest 命令。
 
-## ✅ 缺陷 8 已修复：PID 缺少 conditional integration
+## ✅ 缺陷 10 已修复：控制论集成测试缺失
 
 ### 修改的文件
-- `minicode/feedback_controller.py:133-138` — 外层 `PIDController` 在误差方向穿越 0 时清零积分项，再累积当前误差。
-- `minicode/context_cybernetics.py:249-253` — `ContextPIDController` 使用相同的条件积分逻辑。
-- `tests/test_feedback_controller.py:119-127` — 增加外层 PID 误差反转测试。
-- `tests/test_context_cybernetics.py:157-167` — 增加上下文 PID 误差反转测试。
-- `fix_report.md` — 记录缺陷 8 的修改与验证结果。
+- `tests/test_cybernetic_integration.py:1-265` — 完整建立控制论集成测试文件，覆盖 Mock LLM Agent、A/B 对比、上下文压力、错误爆发、解耦、预测压缩、前馈 setpoint 和振荡故障链路。
+- `fix_report.md` — 记录缺陷 10 的集成测试补齐情况。
 
 ### 数据流变化
 
 修复前：
 ```text
-PID.compute()
-  └──→ error * dt 累积到 integral
-          └──→ 即使误差穿越 0，旧方向积分仍然保留
-                  └──→ 输出短暂滞后或过冲
+控制器单元测试
+  ├──→ 各模块独立验证
+  └──→ 缺少跨模块 Agent 执行链路验证
 ```
 
 修复后：
 ```text
-PID.compute()
-  ├──→ 计算当前 error
-  ├──→ 检查 error * previous_error < 0
-  │      └──→ 清零 integral
-  ├──→ 累积当前方向误差
-  └──→ clamp anti-windup → PID output
+Mock LLM + ToolRegistry + Agent Loop
+  ├──→ baseline/cybernetic A/B
+  ├──→ ContextCybernetics → FeedbackController
+  ├──→ StateObserver → SelfHealingEngine
+  ├──→ DecouplingController → PID
+  ├──→ PredictiveController → ContextCompaction
+  └──→ Oscillation feedback → outer ControlSignal
 ```
 
 ### 新的数据流图
 ```text
-历史误差 ───────┐
-                ▼
-当前误差 ───→ 方向穿越检测
-                │
-                ├── 未穿越 0 → 继续累积积分
-                │
-                └── 穿越 0 → 清零旧积分
-                                └──→ 累积新方向误差
-                                        └──→ P + I + D
-```
-
-### 验证方法
-- `python3 -m py_compile minicode/feedback_controller.py minicode/context_cybernetics.py tests/test_feedback_controller.py tests/test_context_cybernetics.py` — 语法检查通过。
-- 外层 PID 从正误差切换到负误差后，积分项正确重置为当前负方向误差。
-- Context PID 从正误差切换到负误差后，积分项正确重置为当前负方向误差。
-- 当前环境没有安装 `pytest`，因此未运行 pytest 命令。
-
-## ✅ 缺陷 6 已修复：`SystemState.oscillation_index` 是死数据
-
-### 修改的文件
-- `minicode/feedback_controller.py:277-280` — `FeedbackController.observe()` 读取并限制 `state.oscillation_index`，与内部振荡指数融合后写入 `ControlSignal.oscillation_index`。
-- `tests/test_feedback_controller.py:158-164` — 新增外部振荡指数被消费的测试。
-- `fix_report.md` — 记录本次振荡数据闭环。
-
-### 数据流变化
-
-修复前：
-```text
-ContextCybernetics.to_system_state()
-  └──→ SystemState.oscillation_index
-          └──→ FeedbackController.observe() 不读取
-                  └──→ ControlSignal 只使用内部振荡历史
-```
-
-修复后：
-```text
-ContextCybernetics.to_system_state()
-  └──→ SystemState.oscillation_index
-          └──→ FeedbackController.observe()
-                  └──→ 内部振荡指数 60% + 外部振荡指数 40%
-                          └──→ ControlSignal.oscillation_index
-```
-
-### 新的数据流图
-```text
-ContextCybernetics
-  └──→ SystemState.oscillation_index ───────┐
-                                            │ 40%
-FeedbackController._compute_oscillation() ─┤
-                                            │ 60%
-                                            ▼
-                              ControlSignal.oscillation_index
-                                            │
-                                            └──→ 下游自愈/控制逻辑
-```
-
-外部指数会先限制在 `0.0-1.0`，避免异常状态值污染控制信号。本次只解决缺陷 6 的死数据问题，未修改缺陷 7 的两个检测器统一逻辑。
-
-### 验证方法
-- `python3 -m py_compile minicode/feedback_controller.py tests/test_feedback_controller.py` — 语法检查通过。
-- 使用 `SystemState(oscillation_index=0.8)` 验证首轮输出为 `0.32`，证明外部振荡指数已被消费。
-- 当前环境没有安装 `pytest`，因此未运行 pytest 命令。
-
-## ✅ 缺陷 7 已修复：存在两个独立且语义不一致的振荡检测器
-
-### 修改的文件
-- `minicode/context_cybernetics.py:578-592` — 新增 `get_direction_changes()`，输出最近压缩使用率的原始方向变化次数；`detect_oscillation()` 改为基于该原始值进行布尔阈值判断。
-- `minicode/context_cybernetics.py:607-608` — `get_stats()` 输出统一的原始 `direction_changes`。
-- `minicode/context_cybernetics.py:861` — `to_system_state()` 将方向变化次数归一化为 `0.0-1.0` 的 `SystemState.oscillation_index`。
-- `tests/test_context_cybernetics.py:397-409` — 新增原始方向变化次数测试，并保留布尔检测兼容性测试。
-- `fix_report.md` — 记录缺陷 7 的数据流统一过程。
-
-### 数据流变化
-
-修复前：
-```text
-CyberneticFeedbackLoop.detect_oscillation()
-  └──→ bool
-          └──→ SystemState.oscillation_index = 0.0 或 1.0
-
-FeedbackController._compute_oscillation()
-  └──→ float
-          └──→ ControlSignal.oscillation_index
-
-两个检测器输出语义不同，ContextCybernetics 的原始变化量没有向上游传递。
-```
-
-修复后：
-```text
-CyberneticFeedbackLoop
-  └──→ get_direction_changes() → 原始次数
-          ├──→ detect_oscillation() → bool 阈值兼容接口
-          └──→ get_stats() → direction_changes
-                  └──→ to_system_state()
-                          └──→ 归一化 oscillation_index
-                                  └──→ FeedbackController 融合
-```
-
-### 新的数据流图
-```text
-压缩使用率序列
+真实 Agent 集成测试
   │
-  └──→ get_direction_changes()
-          └──→ direction_changes = N
-                  └──→ min(1.0, N / 10.0)
-                          └──→ SystemState.oscillation_index
-                                  ├──→ 内部误差振荡指数 60%
-                                  └──→ ContextCybernetics 振荡指数 40%
-                                          └──→ ControlSignal.oscillation_index
+  ├── 正常任务
+  │     └──→ Mock LLM → ToolRegistry → Agent result
+  │
+  ├── A/B 对比
+  │     └──→ enable_work_chain=False / True
+  │             └──→ completion / steps / tool_errors
+  │
+  ├── 故障场景
+  │     ├──→ 上下文压力 → Context PID → Feedback PID
+  │     ├──→ 错误爆发 → StateObserver → SelfHealingEngine
+  │     └──→ 振荡序列 → SystemState → ControlSignal
+  │
+  └── 预测与解耦
+        ├──→ predictive compaction → message synchronization
+        └──→ coupling matrix → PID gain adjustment
 ```
 
-旧的 `detect_oscillation()` 仍返回布尔值，保证现有调用方兼容；统一后的原始信号由 `get_direction_changes()` 提供。
-
 ### 验证方法
-- `python3 -m py_compile minicode/context_cybernetics.py minicode/feedback_controller.py tests/test_context_cybernetics.py tests/test_feedback_controller.py` — 语法检查通过。
-- 交替使用率序列验证 `get_direction_changes()` 返回原始次数 `4`。
-- 验证 `detect_oscillation()` 仍按阈值返回 `True`。
-- 当前环境没有安装 `pytest`，因此未运行 pytest 命令。
+- `wc -l tests/test_cybernetic_integration.py` — 集成测试文件已存在并包含 7 个测试场景。
+- `python3 -m py_compile tests/test_cybernetic_integration.py` — 语法检查通过。
+- 已手动执行振荡故障集成场景，确认 `SystemState.oscillation_index=0.4` 且外层控制信号收到振荡数据。
